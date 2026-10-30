@@ -3,6 +3,8 @@ variables
 {
   message 0x7E0 TxMsg;
   msTimer gTimer;
+  msTimer gStopTimer;   /* Ë¢Ğ´³É¹¦ºóµÄ×Ô¶¯Í£Ö¹ÑÓÊ±¶¨Ê±Æ÷ */
+  msTimer gWatchdog;    /* È«¾Ö¿´ÃÅ¹·£ºÈÎºÎÒì³£Â·¾¶¶¼±ØĞëÈÃ²âÁ¿Í£ÏÂÀ´ */
   int gState;
   int gBlockNum;
   int gTotalBlocks;
@@ -15,11 +17,11 @@ variables
   byte gSid;
   byte gNrc;
 
-  /* 0x27 å®‰å…¨è®¿é—®ç›¸å…³ */
-  word gSeed;     /* Bootloader ä¸‹å‘çš„ç§å­ */
-  word gKey;      /* è®¡ç®—å‡ºçš„å¯†é’¥ */
+  /* 0x27 °²È«·ÃÎÊÏà¹Ø */
+  word gSeed;     /* Bootloader ÏÂ·¢µÄÖÖ×Ó */
+  word gKey;      /* ¼ÆËã³öµÄÃÜÔ¿ */
 
-  /* 0x22 F19A æ¿€æ´»æ§½æŸ¥è¯¢ç›¸å…³ */
+  /* 0x22 F19A ¼¤»î²Û²éÑ¯Ïà¹Ø */
   byte gActiveSlot;  /* 0=A, 1=B */
 }
 
@@ -47,6 +49,9 @@ on start
   gSeed = 0;
   gKey = 0;
   setTimer(gTimer, 100);
+
+  /* 10 ·ÖÖÓ¶µµ×£ºÕı³£Ë¢Ğ´¼¸Ê®ÃëÄÚÍê³É£¬×ßµ½ÕâÀïËµÃ÷Á÷³Ì¿¨ËÀÁË */
+  setTimer(gWatchdog, 600000);
 }
 
 ReadAppBin(char binName[])
@@ -57,14 +62,14 @@ ReadAppBin(char binName[])
 
   gAppSize = 0;
 
-  /* å…ˆæ‰¾ CANoe å·¥ç¨‹ç›®å½•ä¸‹çš„ binï¼Œæ‰¾ä¸åˆ°å†å›é€€åˆ°æºç å·¥ç¨‹ç›®å½• */
+  /* ÏÈÕÒ CANoe ¹¤³ÌÄ¿Â¼ÏÂµÄ bin£¬ÕÒ²»µ½ÔÙ»ØÍËµ½Ô´Âë¹¤³ÌÄ¿Â¼ */
   fileHandle = openFileRead(binName, 1);
   if (fileHandle == 0)
   {
     snprintf(fullPath, 256, "C:\\Users\\10608\\Documents\\NXP_S32_3.4\\demo_s32k144\\%s", binName);
     fileHandle = openFileRead(fullPath, 1);
   }
-  /* å†å›é€€åˆ° IDE ç¼–è¯‘è¾“å‡ºç›®å½•ï¼ˆAPP_A / APP_B è‡ªåŠ¨ç”Ÿæˆçš„ binï¼‰ */
+  /* ÔÙ»ØÍËµ½ IDE ±àÒëÊä³öÄ¿Â¼£¨APP_A / APP_B ×Ô¶¯Éú³ÉµÄ bin£© */
   if (fileHandle == 0)
   {
     if (strncmp(binName, "app_a", 5) == 0)
@@ -181,7 +186,9 @@ on timer gTimer
       write("  Check UART: 'S32K144 App Running V1.0'");
       write("  LED1: ON, LED0: blink 200ms");
       write("========================================");
+      write("[AutoStop] measurement will stop in 2s ...");
       gState = 999;
+      setTimer(gStopTimer, 2000);
       break;
 
     case 100:
@@ -200,7 +207,7 @@ on timer gTimer
       write("ERROR: 0x27 02 timeout, retry...");
       gRetryCount++;
       if (gRetryCount > 3) { stop(); break; }
-      /* é‡æ–°è¯·æ±‚ç§å­ */
+      /* ÖØĞÂÇëÇóÖÖ×Ó */
       gState = 1; setTimer(gTimer, 100); break;
 
     case 400:
@@ -229,7 +236,11 @@ on timer gTimer
       gState = 6; setTimer(gTimer, 100); break;
 
     case 800:
-      write("INFO: ECU Reset confirmed, waiting for App...");
+      /* 0x11 Ö®ºó ECU Í¨³£Ö±½Ó¸´Î»¡¢À´²»¼°»Ø 0x51£º
+         300ms ÄÚÃ»ÊÕµ½ÏìÓ¦¾Íµ±×÷¸´Î»³É¹¦£¬¼ÌĞø×ßÍê³ÉÁ÷³Ì£¬±ÜÃâÓÀ¾Ã¿¨ËÀÔÚÕâÀï */
+      write("INFO: no 0x51 in 300ms (ECU reset without response) -> treat as success");
+      gState = 8;
+      setTimer(gTimer, 1000);
       break;
   }
 }
@@ -251,11 +262,11 @@ on message 0x7E8
       setTimer(gTimer, 500);
       return;
     }
-    /* æ•°æ®å—ä¼ è¾“ä¸­æ”¶åˆ° 0x73ï¼ˆå—åºå·é”™è¯¯ï¼‰ï¼š
-       è¯´æ˜å›ºä»¶å·²ç»æ”¶åˆ°è¿‡æˆ‘ä»¬æ­£åœ¨ç­‰å¾…ç¡®è®¤çš„é‚£ä¸€å¸§ï¼Œå®ƒæ­£åœ¨ç­‰ä¸‹ä¸€å¸§ã€‚
-       å®æµ‹ gState å¯èƒ½æ˜¯ 500ï¼ˆç­‰å“åº”ä¸­ï¼‰ä¹Ÿå¯èƒ½æ˜¯ 4ï¼ˆé‡è¯•ç­‰å¾…çª—å£ï¼‰ï¼Œ
-       ä½† gBlockNum / gOffset å§‹ç»ˆæŒ‡å‘æ­£ç¡®çš„ä¸‹ä¸€å—ï¼Œç›´æ¥ç»­å‘å³å¯é‡åŒæ­¥ã€‚
-       å³ä½¿å¶å‘å¤šå‘ä¸€å¸§ï¼Œå›ºä»¶ä¼šå†ç”¨ 0x73 æ‹’ç»ï¼Œæœ¬é€»è¾‘è‡ªæ„ˆï¼Œä¸ä¼šå†™é”™æ•°æ®ã€‚ */
+    /* Êı¾İ¿é´«ÊäÖĞÊÕµ½ 0x73£¨¿éĞòºÅ´íÎó£©£º
+       ËµÃ÷¹Ì¼şÒÑ¾­ÊÕµ½¹ıÎÒÃÇÕıÔÚµÈ´ıÈ·ÈÏµÄÄÇÒ»Ö¡£¬ËüÕıÔÚµÈÏÂÒ»Ö¡¡£
+       Êµ²â gState ¿ÉÄÜÊÇ 500£¨µÈÏìÓ¦ÖĞ£©Ò²¿ÉÄÜÊÇ 4£¨ÖØÊÔµÈ´ı´°¿Ú£©£¬
+       µ« gBlockNum / gOffset Ê¼ÖÕÖ¸ÏòÕıÈ·µÄÏÂÒ»¿é£¬Ö±½ÓĞø·¢¼´¿ÉÖØÍ¬²½¡£
+       ¼´Ê¹Å¼·¢¶à·¢Ò»Ö¡£¬¹Ì¼ş»áÔÙÓÃ 0x73 ¾Ü¾ø£¬±¾Âß¼­×ÔÓú£¬²»»áĞ´´íÊı¾İ¡£ */
     if ((gNrc == 0x73) && ((gState == 500) || (gState == 4)))
     {
       write("  [Resync] resume from block %d (gState=%d)", gBlockNum, gState);
@@ -280,18 +291,18 @@ on message 0x7E8
       break;
 
     case 250:
-      /* 0x22 F19A æ­£å“åº”ï¼š62 F1 9A <slot>ï¼ˆ0=A, 1=Bï¼‰ */
+      /* 0x22 F19A ÕıÏìÓ¦£º62 F1 9A <slot>£¨0=A, 1=B£© */
       if (gSid == 0x62 && this.byte(2) == 0xF1 && this.byte(3) == 0x9A)
       {
         gActiveSlot = this.byte(4);
         write("  [OK] 0x62 Active Slot = %d", gActiveSlot);
-        /* ç›®æ ‡æ§½ = éæ¿€æ´»æ§½ï¼ŒåŠ è½½é“¾æ¥åœ°å€åŒ¹é…è¯¥æ§½çš„é•œåƒ */
-        if (gActiveSlot == 0)     /* æ¿€æ´» A -> å†™ B */
+        /* Ä¿±ê²Û = ·Ç¼¤»î²Û£¬¼ÓÔØÁ´½ÓµØÖ·Æ¥Åä¸Ã²ÛµÄ¾µÏñ */
+        if (gActiveSlot == 0)     /* ¼¤»î A -> Ğ´ B */
         {
           write("  -> target Slot B, use app_b.bin");
           ReadAppBin("app_b.bin");
         }
-        else                      /* æ¿€æ´» B -> å†™ A */
+        else                      /* ¼¤»î B -> Ğ´ A */
         {
           write("  -> target Slot A, use app_a.bin");
           ReadAppBin("app_a.bin");
@@ -301,11 +312,11 @@ on message 0x7E8
       break;
 
     case 200:
-      /* 0x27 01 æ­£å“åº”ï¼šPCI 67 01 <seed_hi> <seed_lo> */
+      /* 0x27 01 ÕıÏìÓ¦£ºPCI 67 01 <seed_hi> <seed_lo> */
       if (gSid == 0x67 && this.byte(2) == 0x01)
       {
         gSeed = (this.byte(3) << 8) | this.byte(4);
-        /* å¯†é’¥ç®—æ³•ï¼škey = (seed + 0x1111) & 0xFFFF */
+        /* ÃÜÔ¿Ëã·¨£ºkey = (seed + 0x1111) & 0xFFFF */
         gKey = (gSeed + 0x1111) & 0xFFFF;
         write("  [OK] 0x67 Seed=0x%04X, computed Key=0x%04X", gSeed, gKey);
         gState = 2; setTimer(gTimer, 100);
@@ -313,7 +324,7 @@ on message 0x7E8
       break;
 
     case 300:
-      /* 0x27 02 æ­£å“åº”ï¼šPCI 67 02 */
+      /* 0x27 02 ÕıÏìÓ¦£ºPCI 67 02 */
       if (gSid == 0x67 && this.byte(2) == 0x02)
       {
         write("  [OK] 0x67 Security Unlocked");
@@ -340,7 +351,7 @@ on message 0x7E8
       }
       else
       {
-        /* è°ƒè¯•ï¼šæ‰“å°ç­‰å¾…æ•°æ®å—æœŸé—´æ”¶åˆ°çš„é 0x76 å“åº”ï¼ˆå®šä½è¶…æ—¶åŸå› ï¼‰ */
+        /* µ÷ÊÔ£º´òÓ¡µÈ´ıÊı¾İ¿éÆÚ¼äÊÕµ½µÄ·Ç 0x76 ÏìÓ¦£¨¶¨Î»³¬Ê±Ô­Òò£© */
         write("  RX@500: %02X %02X %02X %02X %02X %02X %02X %02X",
               this.byte(0), this.byte(1), this.byte(2), this.byte(3),
               this.byte(4), this.byte(5), this.byte(6), this.byte(7));
@@ -374,6 +385,20 @@ on message 0x7E8
   }
 }
 
+/* ---------- ×Ô¶¯Í£Ö¹£ºË¢Ğ´½áÊøºóÈÃ CANoe ×Ô¼ºÍ£ÏÂÀ´ ---------- */
+on timer gStopTimer
+{
+  write("[AutoStop] measurement stopped.");
+  stop();
+}
+
+on timer gWatchdog
+{
+  if (gState == 999) return;
+  write("ERROR: watchdog fired (gState=%d), force stop.", gState);
+  stop();
+}
+
 SendTransferData()
 {
   byte b0, b1, b2, b3;
@@ -382,7 +407,7 @@ SendTransferData()
 
   blockNumByte = gBlockNum & 0xFF;
 
-  /* æœ€åä¸€å—å¯èƒ½ä¸ï¿½?4 å­—èŠ‚ï¼Œç”¨ 0xFF è¡¥é½ï¼ˆå’Œ Bootloader 0x37 å¤„ç†é€»è¾‘ä¸€è‡´ï¼‰ */
+  /* ×îºóÒ»¿é¿ÉÄÜ²»×ã 4 ×Ö½Ú£¬ÓÃ 0xFF ²¹Æë£¨Óë Bootloader 0x37 ´¦ÀíÂß¼­Ò»ÖÂ£© */
   remaining = gAppSize - gOffset;
   b0 = 0xFF;
   b1 = 0xFF;
@@ -393,7 +418,7 @@ SendTransferData()
   if (remaining >= 3) b2 = gAppData[gOffset + 2];
   if (remaining >= 4) b3 = gAppData[gOffset + 3];
 
-  /* å®é™…æ•°æ®é•¿åº¦ï¼ˆæœ€ï¿½?å­—èŠ‚ï¿½?*/
+  /* Êµ¼ÊÓĞĞ§Êı¾İ³¤¶È£¨Ä©¿é¿ÉÄÜ²»×ã 4 ×Ö½Ú£© */
   if (remaining >= 4) remaining = 4;
   SendFrame(0x06, 0x36, (byte)blockNumByte, b0, b1, b2, b3, 0x00);
 
