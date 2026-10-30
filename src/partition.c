@@ -151,7 +151,7 @@ static uint8_t Partition_ExternalMatches(void)
  */
 static void Partition_PrintStatus(uint8_t backupOk)
 {
-    UART_SendString("[Partition] seq=");
+    UART_SendString("[PART] seq=");
     Partition_PrintU32((uint32_t)g_partition.table_seq);
 
     UART_SendString(" active=");
@@ -186,17 +186,17 @@ void Partition_Init(void)
         /* 新格式表带自校验；table_crc==0 的手工表视为旧格式，只认 magic */
         if ((g_partition.table_crc != 0U) &&
             (Partition_CalcCrc(&g_partition) != g_partition.table_crc)) {
-            UART_SendString("Partition table CRC error, try SPI backup...\r\n");
+            UART_SendString("[PART] internal table CRC error -> try SPI backup\r\n");
             needRestore = 1U;
         }
     } else {
-        UART_SendString("Partition table missing, try SPI backup...\r\n");
+        UART_SendString("[PART] internal table missing -> try SPI backup\r\n");
         needRestore = 1U;
     }
 
     if (needRestore) {
         if (Partition_RestoreFromExternal()) {
-            UART_SendString("Partition table restored from SPI flash.\r\n");
+            UART_SendString("[PART] restored from SPI flash -> OK\r\n");
         } else {
             /* 外部也没有 → 首次烧录或彻底损坏：重建默认表（激活 Slot A，两槽为空） */
             memset(&g_partition, 0, sizeof(g_partition));
@@ -299,7 +299,7 @@ uint8_t Partition_CommitUpdate(uint32_t crc32, uint32_t size)
 
     /* 1) 先写外部备份：这一步失败不影响升级，内部表照写 */
     if (Partition_SaveToExternal() != 0U) {
-        UART_SendString("WARN: partition backup to SPI flash failed\r\n");
+        UART_SendString("[WARN] partition backup to SPI flash failed\r\n");
     }
 
     /* 2) 再原子落盘：擦写内部描述表扇区 */

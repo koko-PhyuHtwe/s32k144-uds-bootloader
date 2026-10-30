@@ -183,8 +183,10 @@ on timer gTimer
       write("");
       write("========================================");
       write("  Download Complete!");
-      write("  Check UART: 'S32K144 App Running' / 'Active slot:'");
-      write("  LED: slot A = GREEN blink, slot B = BLUE blink");
+      if (gActiveSlot == 0)
+        write("  new slot: B  -- UART: '[SYS ] S32K144 App V1.0 | active slot B'");
+      else
+        write("  new slot: A  -- UART: '[SYS ] S32K144 App V1.0 | active slot A'");
       write("========================================");
       write("[AutoStop] measurement will stop in 2s ...");
       gState = 999;

@@ -293,7 +293,7 @@ demo_s32k144/
 | **App 运行，激活槽 = B** | **200ms 闪烁** | 熄灭 |
 | **卡死 / 未启动** | — | — |
 
-激活槽取自分区描述表（`0xF000` 的 `active_slot`），串口横幅同一时间打印 `Active slot: A|B`，两处可互相印证。
+激活槽取自分区描述表（`0xF000` 的 `active_slot`），串口横幅同一时间打印 `[SYS ] S32K144 App V1.0 | active slot A|B`，两处可互相印证。
 
 ---
 
@@ -310,7 +310,7 @@ demo_s32k144/
 | **0x36** | 传输数据 | BlockNumber + 4 字节数据 | 攒满 8 字节写一次 Flash |
 | **0x37** | 退出传输 | 无 | 补 0xFF 写入剩余数据，退出升级模式 |
 
-> **欠压保护（v2.1）**：`adc_mon` 判定供电 < 2.9 V 时，`0x34` / `0x36` / `0x2E` 直接返回 **NRC 0x22**（conditionsNotCorrect），串口对应打印 `0x34 rejected / Download aborted / Commit rejected: supply undervoltage`。下载中途被中止时会回到空闲、S3 超时后自动跳回原激活槽（不会卡在 Boot）。
+> **欠压保护（v2.1）**：`adc_mon` 判定供电 < 2.9 V 时，`0x34` / `0x36` / `0x2E` 直接返回 **NRC 0x22**（conditionsNotCorrect），串口对应打印 `[OTA ] 0x34 rejected / [OTA ] download aborted / [OTA ] commit rejected: supply undervoltage`。下载中途被中止时会回到空闲、S3 超时后自动跳回原激活槽（不会卡在 Boot）。
 
 ### 0x27 安全访问机制
 
@@ -434,16 +434,38 @@ Final : 0x11 01                  → ECU 复位 (正响应 0x51 01)
 | 发送 | 轮询 `LPUART_DRV_SendDataPolling` |
 | 接收 | SDK 异步中断 + 回调（`uart_rx_callback` → `g_rxReady` 标志） |
 
-上电串口输出：
+上电串口输出（统一 `[标签] 内容` 格式，一行一条事件，标签定宽 6 字符便于对齐）：
 ```
-========================================
-  S32K144 System Boot
-  CORE_CLK  = 80 MHz
-  BUS_CLK   = 40 MHz
-  FLASH_CLK = 20 MHz
-  LPUART1   = 115200 8N1
-========================================
+[SYS ] S32K144 Bootloader
+[SYS ] CORE 80MHz | BUS 40MHz | FLASH 20MHz | UART 115200
+[PART] seq=1 active=A crc=ok backup=ok
+[ADC ] 3300 mV OK
+[BOOT] jump -> App
+[SYS ] S32K144 App V1.0 | active slot A | send 'U' to upgrade
 ```
+
+App 里收到 `U` 后走升级路径：
+```
+[OTA ] 'U' received -> write upgrade flag ... OK -> reset
+[SYS ] S32K144 Bootloader
+[SYS ] CORE 80MHz | BUS 40MHz | FLASH 20MHz | UART 115200
+[PART] seq=1 active=A crc=ok backup=ok
+[ADC ] 3300 mV OK
+[BOOT] upgrade flag set -> stay in bootloader | active slot A
+```
+
+标签含义：
+
+| 标签 | 用途 |
+|------|------|
+| `[SYS ]` | 启动横幅、时钟 / 波特率等系统信息 |
+| `[PART]` | 分区表状态、外部备份与恢复、提交 |
+| `[ADC ]` | 供电电压采样结果 |
+| `[BOOT]` | Bootloader 决策（跳转 App / 停留等待） |
+| `[OTA ]` | 升级流程：0x34 / 0x36 / 0x2E、CRC、提交 |
+| `[UDS ]` | 会话超时等协议事件 |
+| `[WARN]` | 可恢复的警告（不中断流程） |
+| `[ERR ]` | 致命错误（流程终止） |
 
 ### CAN 模块 (`can.h / can.c`)
 
@@ -503,7 +525,7 @@ Bit Rate = 8MHz / (0+1) / 16 = 500,000 bps
 | `boot_count / rollback_count` | 回滚预留字段（本次未启用逻辑） |
 | `table_seq / table_crc` | 表序号 + 表自身 CRC32（写外部备份时更新） |
 
-**外部备份**：每次提交升级前，先把这 80 字节写一份到 W25Q64 的 `0x000000`（`Partition_SaveToExternal()`，擦 → 写 → 读回比对）；内部表损坏时 `Partition_Init()` 会从备份读回并重新写回 `0xF000`（`Partition_RestoreFromExternal()`）。上电打印 `[Partition] seq=N active=A|B crc=ok|legacy backup=ok|none` 便于确认状态。
+**外部备份**：每次提交升级前，先把这 80 字节写一份到 W25Q64 的 `0x000000`（`Partition_SaveToExternal()`，擦 → 写 → 读回比对）；内部表损坏时 `Partition_Init()` 会从备份读回并重新写回 `0xF000`（`Partition_RestoreFromExternal()`）。上电打印 `[PART] seq=N active=A|B crc=ok|legacy backup=ok|none` 便于确认状态。
 
 ### SPI Flash 模块 (`spi_flash.h / spi_flash.c`)
 
@@ -576,9 +598,9 @@ ADC0_CH2（PTA6）采样供电电压，用于升级前与升级中的欠压保�
 | # | 场景 | 操作 | 预期结果 |
 |---|------|------|----------|
 | 1 | 空板（无 App）上电 | 烧 Bootloader，不烧 App | 蓝绿灯 500ms 交替闪，5 秒打印 `No valid App` |
-| 2 | 有 App 上电 | Bootloader + App 都烧好 | 打印 Boot 信息 → `Jumping to App...` → 进入 App |
+| 2 | 有 App 上电 | Bootloader + App 都烧好 | 打印 Boot 信息 → `[BOOT] jump -> App` → 进入 App |
 | 3 | App LED 指示 | 观察 LED | 蓝灯常亮，绿灯 200ms 快闪 |
-| 4 | App 串口升级 | 串口发 `U` | `Upgrade triggered...` → 复位 → Bootloader 打印 `Upgrade flag detected` |
+| 4 | App 串口升级 | 串口发 `U` | `[OTA ] 'U' received -> write upgrade flag ... OK -> reset` → 复位 → Boot 打印 `[BOOT] upgrade flag set -> stay in bootloader | active slot A` |
 | 5 | CANoe 自动刷写 | CANoe 开始测量 | 自动 9 步流程（0x22 选槽 + 0x27 解锁）→ 复位 → 新激活槽 App 启动 |
 | 6 | A/B 槽位翻转 | 连续两次升级 | 每次升级后 App 在 A、B 槽交替运行 |
 | 7 | 掉电安全 | 升级传输中断电再上电 | 5 秒后旧固件照常启动（见下节） |
@@ -588,7 +610,7 @@ ADC0_CH2（PTA6）采样供电电压，用于升级前与升级中的欠压保�
 ```
 ① App 发 'U' → Bootloader
 ② CANoe 下载传输到一半 → 拔板子电源
-③ 重新上电 → "Upgrade flag detected" → S3 等待
+③ 重新上电 → "[BOOT] upgrade flag set -> stay in bootloader" → S3 等待
 ④ 等 5 秒（不做任何操作）→ Bootloader 跳激活槽 → 旧固件照常运行 ✅
 ⑤ 再发 'U' → 重新下载 → 完整跑完 → 新固件从另一槽启动
 ```
@@ -641,7 +663,7 @@ ADC0_CH2（PTA6）采样供电电压，用于升级前与升级中的欠压保�
 9. **LED 是低电平点亮**：PTD15 = LED0 = 蓝灯、PTD16 = LED1 = 绿灯，`led.c` 里 `LED_ON_LEVEL = 0`。换板子若为高电平点亮，把这个宏改成 `1`。
 10. **SPI 片选必须 GPIO 软件控制**：不要改回 LPSPI 的 PCS3 硬件片选——多字节命令帧中途会松开片选，芯片把后续字节当新命令，读回全 `0xFF`。
 11. **App 两个构建配置要分别重编**：改过 App 代码后必须 APP_A、APP_B 各 Build 一次，否则两个槽里装的是同一份旧镜像（槽位灯会永远显示同一个槽，容易误判成代码 bug）。
-12. **分区表备份与正本内容一致**：提交时先写 W25Q64（`0x000000`）再写内部 `0xF000`；若内部表损坏，上电会从外部读回并重写正本，串口打印 `Partition table restored from SPI flash.`。
+12. **分区表备份与正本内容一致**：提交时先写 W25Q64（`0x000000`）再写内部 `0xF000`；若内部表损坏，上电会从外部读回并重写正本，串口打印 `[PART] restored from SPI flash -> OK`。
 13. **ADC 欠压只看 Boot**：App 运行期不采样电压，所以"运行中掉压"不会触发保护；演示时应在刷写（Boot）阶段拧电位器。
 
 ---

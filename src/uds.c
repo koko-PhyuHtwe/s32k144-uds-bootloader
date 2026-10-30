@@ -488,25 +488,25 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
     if (actualCrc != expectedCrc) {
         /* CRC 不一致，校验失败，不跳 App */
         UDS_SendNegativeResponse(UDS_SID_WRITE_DID, UDS_NRC_GENERAL_PROGRAMMING_FAILURE);
-        UART_SendString("CRC FAIL\r\n");
+        UART_SendString("[OTA ] CRC FAIL\r\n");
         return;
     }
 
     /* CRC 一致，校验通过 */
-    UART_SendString("CRC OK\r\n");
+    UART_SendString("[OTA ] CRC OK\r\n");
 
     /* 电压监控：提交前最后确认一次供电。欠压就不写描述表——
      * 内部正本和外部副本都不动，下次上电还是跑原来的固件 */
     if (AdcMon_IsCritical()) {
-        UART_SendString("Commit rejected: supply undervoltage\r\n");
+        UART_SendString("[OTA ] commit rejected: supply undervoltage\r\n");
         UDS_SendNegativeResponse(UDS_SID_WRITE_DID, UDS_NRC_CONDITIONS_NOT_CORRECT);
         return;
     }
 
     /* 提交升级：写描述表 + 翻转激活槽（原子切换） */
-    UART_SendString("Committing update to partition table...\r\n");
+    UART_SendString("[OTA ] committing partition table ...\r\n");
     if (Partition_CommitUpdate(actualCrc, downloadTotalSize) != 0U) {
-        UART_SendString("Commit FAIL\r\n");
+        UART_SendString("[OTA ] commit FAILED\r\n");
         UDS_SendNegativeResponse(UDS_SID_WRITE_DID, UDS_NRC_GENERAL_PROGRAMMING_FAILURE);
         return;
     }
@@ -527,7 +527,7 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
 
     /* 等待 CANoe Step 6 发送 0x11 ECU Reset 触发完整复位，
        然后 Bootloader 重启后跳转到新激活槽的 App */
-    UART_SendString("Update committed, waiting for ECU Reset (Step 6)...\r\n");
+    UART_SendString("[OTA ] committed -> wait for ECU reset\r\n");
 
     /* 不直接跳转！防止 UDS 上下文跳转时状态未清理干净导致卡死 */
 }
@@ -584,7 +584,7 @@ static void UDS_HandleRequestDownload(const can_frame_t *frame)
 
     /* 电压监控：供电欠压时拒绝开始下载（此时还没擦任何 Flash） */
     if (AdcMon_IsCritical()) {
-        UART_SendString("0x34 rejected: supply undervoltage\r\n");
+        UART_SendString("[OTA ] 0x34 rejected: supply undervoltage\r\n");
         UDS_SendNegativeResponse(UDS_SID_REQUEST_DOWNLOAD, UDS_NRC_CONDITIONS_NOT_CORRECT);
         return;
     }
@@ -639,7 +639,7 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
     /* 电压监控：刷写中途检测到供电欠压 → 立即中止本次下载，不提交，
      * 保持当前运行的固件不变（这是"刷到一半掉电"的演示触发点） */
     if (AdcMon_IsCritical()) {
-        UART_SendString("Download aborted: supply undervoltage\r\n");
+        UART_SendString("[OTA ] download aborted: supply undervoltage\r\n");
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_CONDITIONS_NOT_CORRECT);
         downloadState   = DOWNLOAD_IDLE;
         dataBufferIndex = 0U;
@@ -681,7 +681,7 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
 
         if ((receivedSoFar >= allowedTotal) ||
             ((uint32_t)recvDataLen > (allowedTotal - receivedSoFar))) {
-            UART_SendString("Download overflow, abort (restart from 0x34)\r\n");
+            UART_SendString("[OTA ] download overflow -> abort, restart from 0x34\r\n");
             UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_REQUEST_OUT_OF_RANGE);
             downloadState   = DOWNLOAD_IDLE;  /* 中止本次下载，需重新 0x34 */
             dataBufferIndex = 0U;
@@ -756,7 +756,7 @@ static void UDS_HandleRequestTransferExit(const can_frame_t *frame)
     UDS_SendPositiveResponse(UDS_SID_REQUEST_TRANSFER_EXIT, NULL, 0);
 
     /* 升级完成，等待上位机发送 0x2E 做 CRC32 校验后再跳 App */
-    UART_SendString("Upgrade done, waiting for CRC32 check...\r\n");
+    UART_SendString("[OTA ] transfer done -> wait for CRC32 check\r\n");
 }
 
 /* ==================== 内部辅助函数 ==================== */
@@ -831,11 +831,11 @@ void UDS_Tick(void)
         if (s3ServerTimer == 0U) {
             /* 超时了，如果不在升级中就跳 App */
             if (!bootloaderActive) {
-                UART_SendString("S3 timeout, checking App...\r\n");
+                UART_SendString("[UDS ] S3 timeout -> check App\r\n");
                 Jump_To_App(Partition_GetActiveBase());
             } else {
                 /* 升级中，延长超时 */
-                UART_SendString("S3 timeout, download in progress, wait...\r\n");
+                UART_SendString("[UDS ] S3 timeout, download in progress\r\n");
                 s3ServerTimer = S3_SERVER_TIMEOUT_MS;
             }
         }
@@ -873,7 +873,7 @@ void Jump_To_App(uint32_t slotBase)
     if ((appMsp == 0xFFFFFFFFU) || (appMsp == 0x00000000U) ||
         (appMsp < 0x20000000U) || (appMsp > 0x20010000U) ||
         (appPc  < slotBase) || (appPc >= (slotBase + SLOT_SIZE))) {
-        UART_SendString("No valid App, stay in Bootloader\r\n");
+        UART_SendString("[ERR ] no valid App -> stay in bootloader\r\n");
         /* 没有 App，重新开始倒计时 */
         s3ServerTimer = S3_SERVER_TIMEOUT_MS;
         /* 确保中断重新打开（如果之前被关过） */
@@ -882,7 +882,7 @@ void Jump_To_App(uint32_t slotBase)
     }
 
     /* 3. 发送跳转提示（必须在 UART_Deinit 之前打印完） */
-    UART_SendString("Jumping to App...\r\n");
+    UART_SendString("[BOOT] jump -> App\r\n");
 
     /* 4. 反初始化 CAN/UART 外设：
      *    - 先关 CAN：FlexCAN2 残留的接收中断会在 App 侧触发 HardFault

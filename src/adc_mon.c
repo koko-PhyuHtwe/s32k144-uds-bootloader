@@ -82,7 +82,7 @@ bool AdcMon_Init(void)
     ADC_DRV_ConfigChan(ADC_MON_INSTANCE, ADC_MON_CHAN_INDEX, &adc_config_1_ChnConfig0);
 
     if (!AdcMon_WaitConvDone(ADC_MON_TIMEOUT_LOOPS)) {
-        UART_SendString("[ADC] conversion timeout (check ADC0 clock / PTA6)\r\n");
+        UART_SendString("[ADC ] conversion timeout (check ADC0 clock / PTA6)\r\n");
         return false;
     }
 
@@ -222,11 +222,9 @@ const char *AdcMon_StateName(adc_mon_state_t state)
 
 void AdcMon_Print(void)
 {
-    UART_SendString("[ADC] CH2 raw=");
-    AdcMon_PrintU32((uint32_t)s_raw);
-    UART_SendString(" mv=");
+    UART_SendString("[ADC ] ");
     AdcMon_PrintU32(s_mv);
-    UART_SendString(" state=");
+    UART_SendString(" mV ");
     UART_SendString(AdcMon_StateName(s_state));
     UART_SendString("\r\n");
 }

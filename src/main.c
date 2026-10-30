@@ -73,8 +73,7 @@ int main(void)
     uint32_t upgradeFlag = *(volatile uint32_t *)UPGRADE_FLAG_ADDR;
     if (upgradeFlag == UPGRADE_FLAG_MAGIC) {
         /* 有升级请求，留在 Bootloader */
-        UART_SendString("Upgrade flag detected, stay in Bootloader\r\n");
-        UART_SendString("Active slot: ");
+        UART_SendString("[BOOT] upgrade flag set -> stay in bootloader | active slot ");
         UART_SendString((Partition_GetActiveSlot() == SLOT_B) ? "B\r\n" : "A\r\n");
 
         /* 清除升级标志（擦除升级标志扇区） */
@@ -85,9 +84,8 @@ int main(void)
         uint8_t verify = Partition_VerifyActiveSlot();
         if (verify == 1U) {
             /* CRC 不匹配：固件损坏，留在 Bootloader 等待重新升级 */
-            UART_SendString("Active slot CRC mismatch, stay in Bootloader\r\n");
+            UART_SendString("[BOOT] active slot CRC mismatch -> stay in bootloader\r\n");
         } else {
-            UART_SendString("No upgrade flag, try jumping to App...\r\n");
             Jump_To_App(Partition_GetActiveBase());
         }
         /* 如果返回，说明没有合法 App，继续往下走 */

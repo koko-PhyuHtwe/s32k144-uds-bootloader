@@ -76,8 +76,7 @@ static void TriggerUpgrade(void)
     /* 升级标志数据：magic + padding（补齐 8 字节对齐） */
     uint32_t flagData[2] = { UPGRADE_FLAG_MAGIC, 0xFFFFFFFFU };
 
-    UART_SendString("\r\n>>> Upgrade triggered!\r\n");
-    UART_SendString(">>> Writing upgrade flag...\r\n");
+    UART_SendString("\r\n[OTA ] 'U' received -> write upgrade flag ... ");
 
     /* 初始化 Flash 驱动 */
     FlashApp_Init();
@@ -85,11 +84,11 @@ static void TriggerUpgrade(void)
     /* 擦除并写入升级标志扇区（升级标志区在 Boot 保护区，需专用接口） */
     if (FlashApp_WriteBootSector(UPGRADE_FLAG_ADDR, (const uint8_t *)flagData, 8U) != 0U)
     {
-        UART_SendString(">>> ERROR: Flash write upgrade flag failed!\r\n");
+        UART_SendString("FAILED\r\n");
         return;
     }
 
-    UART_SendString(">>> Upgrade flag written, resetting...\r\n");
+    UART_SendString("OK -> reset\r\n");
 
     /* 延时确保串口发送完成 */
     OSIF_TimeDelay(100);
@@ -119,23 +118,17 @@ int app_main(void)
     uint8_t slotLedPin = (activeSlot == SLOT_B) ? LED_SLOT_B_PIN : LED_SLOT_A_PIN;
 
     /* ===== App 启动信息 ===== */
-    UART_SendString("\r\n");
-    UART_SendString("========================================\r\n");
-    UART_SendString("  S32K144 App Running\r\n");
-    UART_SendString("  Version: ");
+    UART_SendString("\r\n[SYS ] S32K144 App ");
     UART_SendString(APP_VERSION);
-    UART_SendString("\r\n");
-    UART_SendString("  Active slot: ");
+    UART_SendString(" | active slot ");
     if (activeSlot == SLOT_B) {
         UART_SendString("B");
     } else if (activeSlot == SLOT_A) {
         UART_SendString("A");
     } else {
-        UART_SendString("? (partition table invalid)");
+        UART_SendString("?");
     }
-    UART_SendString("\r\n");
-    UART_SendString("  Send 'U' to enter upgrade mode\r\n");
-    UART_SendString("========================================\r\n");
+    UART_SendString(" | send 'U' to upgrade\r\n");
 
     /* ===== 槽位灯：A 槽亮绿灯，B 槽亮蓝灯，另一个熄灭 ===== */
     if (activeSlot == SLOT_B) {

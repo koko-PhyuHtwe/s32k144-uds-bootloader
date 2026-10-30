@@ -16,13 +16,8 @@ static uint8_t uartInitialized = 0;     /* UART 初始化标志 */
 
 /* 启动信息字符串（纯 ASCII） */
 static const uint8_t bootMsg[] =
-    "\r\n========================================\r\n"
-    "  S32K144 System Boot\r\n"
-    "  CORE_CLK  = 80 MHz\r\n"
-    "  BUS_CLK   = 40 MHz\r\n"
-    "  FLASH_CLK = 20 MHz\r\n"
-    "  LPUART1   = 115200 8N1\r\n"
-    "========================================\r\n\r\n";
+    "\r\n[SYS ] S32K144 Bootloader\r\n"
+    "[SYS ] CORE 80MHz | BUS 40MHz | FLASH 20MHz | UART 115200\r\n";
 
 /* ==================== 静态函数声明 ==================== */
 
