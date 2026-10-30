@@ -115,14 +115,4 @@ bool SpiFlash_WritePage(uint32_t addr, const uint8_t *buf, uint32_t len);
  */
 bool SpiFlash_EraseSector(uint32_t addr);
 
-/**
- * @brief  【仅诊断用】换一个波特率重新初始化 LPSPI1，再读一次 JEDEC ID
- * @param  baudHz: 目标波特率，例如 1000000
- * @return 读到的 JEDEC ID（0x000000 / 0xFFFFFF 表示总线上没有有效数据）
- * @note   用于区分"信号完整性/速率问题"和"根本没接上"。
- *         会重新初始化 LPSPI1（内部先 Deinit 再 Init），
- *         只建议在自检里调用一次，不要放进正常业务流程。
- */
-uint32_t SpiFlash_ProbeAtBaud(uint32_t baudHz);
-
 #endif /* SPI_FLASH_H */

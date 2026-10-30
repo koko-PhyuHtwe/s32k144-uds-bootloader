@@ -142,28 +142,6 @@ bool SpiFlash_IsPresent(void)
     return s_present;
 }
 
-uint32_t SpiFlash_ProbeAtBaud(uint32_t baudHz)
-{
-    lpspi_master_config_t cfg = lpspi_1_MasterConfig0;   /* 用副本，不动 .mex 生成的常量 */
-    uint32_t              id;
-
-    cfg.bitsPerSec  = baudHz;
-    cfg.lpspiSrcClk = SPI_FLASH_CLK_HZ;
-
-    /* 先关掉再重开，让驱动按新波特率重算分频 */
-    (void)LPSPI_DRV_MasterDeinit(SPI_FLASH_INSTANCE);
-    if (LPSPI_DRV_MasterInit(SPI_FLASH_INSTANCE, &lpspi_1State, &cfg) != STATUS_SUCCESS)
-    {
-        return 0U;
-    }
-
-    OSIF_TimeDelay(5);
-
-    id = SpiFlash_ReadJedecId();
-    s_jedec_id = id;
-    return id;
-}
-
 uint32_t SpiFlash_ReadJedecId(void)
 {
     s_tx_buf[0] = CMD_JEDEC_ID;

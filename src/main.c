@@ -31,7 +31,6 @@ int main(void)
 #include "flash_app.h"
 #include "partition.h"
 #include "spi_flash.h"        /* 描述表外部备份 */
-#include "spi_flash_test.h"   /* 【临时】SPI Flash 自检，验证完可删 */
 #include "app.h"  /* 共享升级标志定义 */
 
 /**
@@ -54,9 +53,6 @@ int main(void)
     /* 4. 初始化 UART 并发送启动信息 */
     UART_Init();
     UART_SendBootMessage();
-
-    /* ===== 【临时】SPI Flash 硬件自检（不需要时删掉这一行） ===== */
-    SpiFlash_RunSelfTest();
 
     /* 5. 初始化 SPI Flash（描述表外部备份用；没焊芯片时会自动降级） */
     (void)SpiFlash_Init();
