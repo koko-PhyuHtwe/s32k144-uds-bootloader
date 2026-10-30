@@ -49,7 +49,10 @@ typedef struct {
     uint32_t boot_count;        /* 引导计数 */
     uint32_t rollback_count;    /* 回滚次数 */
 
-    uint8_t  reserved[32];      /* 预留对齐 */
+    /* ---- 自校验与外部备份（旧版此处是纯 reserved[32]，结构体大小不变） ---- */
+    uint32_t table_seq;         /* 提交序号，每次成功提交 +1 */
+    uint32_t table_crc;         /* 整表 CRC32（本字段按 0 参与计算）；0 = 旧格式表 */
+    uint8_t  reserved[24];      /* 预留对齐 */
 } partition_table_t;
 
 /* ==================== 魔术字 ==================== */

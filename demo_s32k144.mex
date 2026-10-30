@@ -55,6 +55,26 @@
                         <pin_feature name="direction" value="OUTPUT"/>
                      </pin_features>
                   </pin>
+                  <pin peripheral="LPSPI1" signal="pcs, 3" pin_num="63" pin_signal="PTB17">
+                     <pin_features>
+                        <pin_feature name="direction" value="OUTPUT"/>
+                     </pin_features>
+                  </pin>
+                  <pin peripheral="LPSPI1" signal="sck, sck" pin_num="66" pin_signal="PTB14">
+                     <pin_features>
+                        <pin_feature name="direction" value="OUTPUT"/>
+                     </pin_features>
+                  </pin>
+                  <pin peripheral="LPSPI1" signal="sin" pin_num="65" pin_signal="PTB15">
+                     <pin_features>
+                        <pin_feature name="direction" value="INPUT"/>
+                     </pin_features>
+                  </pin>
+                  <pin peripheral="LPSPI1" signal="sout" pin_num="64" pin_signal="PTB16">
+                     <pin_features>
+                        <pin_feature name="direction" value="OUTPUT"/>
+                     </pin_features>
+                  </pin>
                </pins>
             </function>
          </functions_list>
@@ -176,6 +196,7 @@
                   <setting id="HSRUN:SCG.DIVCORE.scale" value="2" locked="true"/>
                   <setting id="HSRUN:SCG.DIVSLOW.scale" value="4" locked="true"/>
                   <setting id="HSRUN:SCG.SCSSEL.sel" value="SCG.SPLL_CLK" locked="false"/>
+                  <setting id="PCC.LPSPI1_CLK_SEL.sel" value="SCG.SOSCDIV2_CLK" locked="false"/>
                   <setting id="PCC.LPTMR0_FRAC.scale" value="1" locked="true"/>
                   <setting id="PCC.PREDIV.scale" value="1" locked="true"/>
                   <setting id="PCC.PREDIVTRACE.scale" value="1" locked="true"/>
@@ -273,12 +294,24 @@
                   <data type="Version">1.0.0</data>
                </feature>
             </dependency>
+            <dependency resourceType="SWComponent" resourceId="platform.driver.lpspi" description="工具链/IDE工程中未找到LPSPI Driver。工程不会被编译！" problem_level="2" source="Peripherals">
+               <feature name="enabled" evaluation="equal">
+                  <data type="Boolean">true</data>
+               </feature>
+            </dependency>
+            <dependency resourceType="SWComponent" resourceId="platform.driver.lpspi" description="工具链/IDE工程不支持LPSPI Driver版本。所需值: ${required_value}, 实际值: ${actual_value}. 工程可能没有被正确编译。" problem_level="1" source="Peripherals">
+               <feature name="version" evaluation="equivalent">
+                  <data type="Version">1.0.0</data>
+               </feature>
+            </dependency>
          </dependencies>
          <generated_project_files>
             <file path="board/peripherals_flash_1.c" update_enabled="true"/>
             <file path="board/peripherals_flash_1.h" update_enabled="true"/>
             <file path="board/peripherals_flexcan_config_1.c" update_enabled="true"/>
             <file path="board/peripherals_flexcan_config_1.h" update_enabled="true"/>
+            <file path="board/peripherals_lpspi_1.c" update_enabled="true"/>
+            <file path="board/peripherals_lpspi_1.h" update_enabled="true"/>
             <file path="board/peripherals_lpuart_1.c" update_enabled="true"/>
             <file path="board/peripherals_lpuart_1.h" update_enabled="true"/>
             <file path="board/peripherals_osif_1.c" update_enabled="true"/>
@@ -411,6 +444,31 @@
                         <array name="adcCompareCfg"/>
                         <array name="adcAverageCfg"/>
                         <array name="adcChanCfg"/>
+                     </config_set>
+                  </instance>
+                  <instance name="lpspi_1" uuid="b18ccb9e-ea73-4047-b603-b57e0c9557f9" type="lpspi_config" type_id="lpspi" mode="general_soft" peripheral="LPSPI_1" enabled="true" comment="" custom_name_enabled="false" editing_lock="false">
+                     <config_set name="lpspi">
+                        <array name="lpspiMasterConfig">
+                           <struct name="0">
+                              <setting name="name" value="lpspi_1_MasterConfig0"/>
+                              <setting name="readOnly" value="true"/>
+                              <setting name="bitsPerSec" value="8000000"/>
+                              <setting name="whichPcs" value="LPSPI_PCS3"/>
+                              <setting name="pcsPolarity" value="LPSPI_ACTIVE_LOW"/>
+                              <setting name="isPcsContinuous" value="false"/>
+                              <setting name="bitcount" value="8"/>
+                              <setting name="lpspiSrcClk" value="8000000"/>
+                              <setting name="clkPhase" value="LPSPI_CLOCK_PHASE_1ST_EDGE"/>
+                              <setting name="clkPolarity" value="LPSPI_SCK_ACTIVE_HIGH"/>
+                              <setting name="lsbFirst" value="false"/>
+                              <setting name="transferType" value="LPSPI_USING_INTERRUPTS"/>
+                              <setting name="rxDMAChannel" value="0"/>
+                              <setting name="txDMAChannel" value="0"/>
+                              <setting name="callback" value="NULL"/>
+                              <setting name="callbackParam" value="NULL"/>
+                           </struct>
+                        </array>
+                        <array name="lpspiSlaveConfig"/>
                      </config_set>
                   </instance>
                </instances>

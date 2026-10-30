@@ -95,6 +95,7 @@ settings:
 - {id: 'HSRUN:SCG.DIVCORE.scale', value: '2', locked: true}
 - {id: 'HSRUN:SCG.DIVSLOW.scale', value: '4', locked: true}
 - {id: 'HSRUN:SCG.SCSSEL.sel', value: SCG.SPLL_CLK}
+- {id: PCC.LPSPI1_CLK_SEL.sel, value: SCG.SOSCDIV2_CLK}
 - {id: PCC.LPTMR0_FRAC.scale, value: '1', locked: true}
 - {id: PCC.PREDIV.scale, value: '1', locked: true}
 - {id: PCC.PREDIVTRACE.scale, value: '1', locked: true}
@@ -153,7 +154,7 @@ peripheral_clock_config_t peripheralClockConfig0[NUM_OF_PERIPHERAL_CLOCKS_0] = {
     {
         .clockName = LPSPI1_CLK,
         .clkGate = true,
-        .clkSrc = CLK_SRC_SIRC_DIV2,
+        .clkSrc = CLK_SRC_SOSC_DIV2,
         .frac = MULTIPLY_BY_ONE,
         .divider = DIVIDE_BY_ONE,
     },

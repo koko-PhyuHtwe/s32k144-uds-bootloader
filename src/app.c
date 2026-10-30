@@ -9,6 +9,7 @@
 #include "led.h"
 #include "uart.h"
 #include "flash_app.h"
+#include "spi_flash_test.h"
 #include "osif.h"
 #include "device_registers.h"
 #include "interrupt_manager.h"
@@ -100,6 +101,9 @@ int app_main(void)
     /* 点亮 LED1 表示 App 运行 */
     LED_TurnOn(LED1_PIN);
     LED_TurnOff(LED0_PIN);
+
+    /* ===== SPI Flash 硬件自检（验证通过后可删除这一行） ===== */
+    SpiFlash_RunSelfTest();
 
     /* ===== 主循环：LED 心跳 + 检查升级命令 ===== */
     uint16_t ledCounter = 0;

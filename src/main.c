@@ -30,6 +30,8 @@ int main(void)
 #include "uds.h"
 #include "flash_app.h"
 #include "partition.h"
+#include "spi_flash.h"        /* 描述表外部备份 */
+#include "spi_flash_test.h"   /* 【临时】SPI Flash 自检，验证完可删 */
 #include "app.h"  /* 共享升级标志定义 */
 
 /**
@@ -53,11 +55,17 @@ int main(void)
     UART_Init();
     UART_SendBootMessage();
 
-    /* 5. 初始化分区模块：从元数据区读取描述表，确定激活槽 */
-    Partition_Init();
+    /* ===== 【临时】SPI Flash 硬件自检（不需要时删掉这一行） ===== */
+    SpiFlash_RunSelfTest();
 
-    /* 6. 初始化 Flash 驱动（清除升级标志 / 提交描述表需要） */
+    /* 5. 初始化 SPI Flash（描述表外部备份用；没焊芯片时会自动降级） */
+    (void)SpiFlash_Init();
+
+    /* 6. 初始化 Flash 驱动（恢复描述表 / 清升级标志 / 提交描述表都需要） */
     FlashApp_Init();
+
+    /* 7. 初始化分区模块：内部表 → 外部备份 → 默认表 */
+    Partition_Init();
 
     /* ===== 检查升级标志 ===== */
     uint32_t upgradeFlag = *(volatile uint32_t *)UPGRADE_FLAG_ADDR;
@@ -85,10 +93,10 @@ int main(void)
 
     /* ===== 外设初始化（仅 Bootloader 模式需要） ===== */
 
-    /* 7. 初始化 CAN（配置发送邮箱 M0 + 接收邮箱 M1，开启中断） */
+    /* 8. 初始化 CAN（配置发送邮箱 M0 + 接收邮箱 M1，开启中断） */
     CAN_Init();
 
-    /* 8. 初始化 UDS 诊断服务 */
+    /* 9. 初始化 UDS 诊断服务 */
     UDS_Init();
 
     /* ===== 主循环 ===== */

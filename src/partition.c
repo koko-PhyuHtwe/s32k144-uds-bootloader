@@ -7,29 +7,208 @@
 
 #include "partition.h"
 #include "flash_app.h"
+#include "spi_flash.h"
+#include "uart.h"
 #include <string.h>
+
+/* ==================== 外部备份位置（W25Q64） ==================== */
+/* 描述表约 80 字节，放在 SPI Flash 第 0 个扇区的首页；
+ * 扇区擦除时只影响这一块，给将来的固件仓库留出 0x1000 之后的全部空间。 */
+#define PARTITION_BACKUP_BASE   0x00000000U
 
 /* ==================== RAM 描述表副本 ==================== */
 static partition_table_t g_partition;
+
+/* ==================== 内部函数 ==================== */
+
+/**
+ * @brief  计算描述表 CRC32（table_crc 字段本身按 0 参与）
+ */
+static uint32_t Partition_CalcCrc(const partition_table_t *tbl)
+{
+    partition_table_t tmp = *tbl;
+    tmp.table_crc = 0U;
+    return FlashApp_CalcCRC32((uint32_t)&tmp, (uint32_t)sizeof(tmp));
+}
+
+/**
+ * @brief  把当前 RAM 表写入外部 Flash 备份并读回校验
+ * @return 0=成功, 1=失败（失败不阻断升级流程）
+ */
+static uint8_t Partition_SaveToExternal(void)
+{
+    partition_table_t chk;
+
+    if (!SpiFlash_IsPresent()) {
+        return 1U;
+    }
+
+    if (!SpiFlash_EraseSector(PARTITION_BACKUP_BASE)) {
+        return 1U;
+    }
+
+    if (!SpiFlash_WritePage(PARTITION_BACKUP_BASE,
+                            (const uint8_t *)&g_partition,
+                            (uint32_t)sizeof(g_partition))) {
+        return 1U;
+    }
+
+    /* 读回比对：外部表也必须是对的，否则恢复时会把坏表当成好表 */
+    if (!SpiFlash_Read(PARTITION_BACKUP_BASE, (uint8_t *)&chk,
+                       (uint32_t)sizeof(chk))) {
+        return 1U;
+    }
+
+    return (memcmp(&chk, &g_partition, sizeof(chk)) == 0U) ? 0U : 1U;
+}
+
+/**
+ * @brief  尝试从外部 Flash 恢复描述表
+ * @return 1=恢复成功（并已写回内部元数据区）, 0=外部也没有可用备份
+ */
+static uint8_t Partition_RestoreFromExternal(void)
+{
+    partition_table_t ext;
+
+    if (!SpiFlash_IsPresent()) {
+        return 0U;
+    }
+
+    if (!SpiFlash_Read(PARTITION_BACKUP_BASE, (uint8_t *)&ext,
+                       (uint32_t)sizeof(ext))) {
+        return 0U;
+    }
+
+    /* 外部表本身也要过 magic + CRC 两道关 */
+    if (ext.magic != PARTITION_TABLE_MAGIC) {
+        return 0U;
+    }
+    if ((ext.table_crc != 0U) && (Partition_CalcCrc(&ext) != ext.table_crc)) {
+        return 0U;
+    }
+
+    g_partition = ext;
+
+    /* 写回内部元数据区：下次上电直接读到好表，不用再走恢复 */
+    (void)FlashApp_WriteBootSector(PARTITION_TABLE_ADDR,
+                                   (const uint8_t *)&g_partition,
+                                   (uint32_t)sizeof(g_partition));
+
+    return 1U;
+}
+
+/**
+ * @brief  打印无符号十进制数（模块内部用，避免依赖 printf）
+ */
+static void Partition_PrintU32(uint32_t value)
+{
+    char    buf[11];
+    char    tmp[10];
+    uint8_t len = 0U;
+    uint8_t i;
+
+    if (value == 0U) {
+        UART_SendString("0");
+        return;
+    }
+
+    while ((value > 0U) && (len < 10U)) {
+        tmp[len] = (char)('0' + (value % 10U));
+        value /= 10U;
+        len++;
+    }
+
+    for (i = 0U; i < len; i++) {
+        buf[i] = tmp[len - 1U - i];
+    }
+    buf[len] = '\0';
+
+    UART_SendString(buf);
+}
+
+/**
+ * @brief  外部备份里是否存着与当前内部表完全相同的一份
+ * @return 1=一致（备份可用）, 0=没有或内容不同
+ */
+static uint8_t Partition_ExternalMatches(void)
+{
+    partition_table_t ext;
+
+    if (!SpiFlash_IsPresent()) {
+        return 0U;
+    }
+
+    if (!SpiFlash_Read(PARTITION_BACKUP_BASE, (uint8_t *)&ext,
+                       (uint32_t)sizeof(ext))) {
+        return 0U;
+    }
+
+    return (memcmp(&ext, &g_partition, sizeof(ext)) == 0U) ? 1U : 0U;
+}
+
+/**
+ * @brief  开机打印一行分区表状态（给使用者看，不需要调试器）
+ */
+static void Partition_PrintStatus(uint8_t backupOk)
+{
+    UART_SendString("[Partition] seq=");
+    Partition_PrintU32((uint32_t)g_partition.table_seq);
+
+    UART_SendString(" active=");
+    UART_SendString((g_partition.active_slot == (uint32_t)SLOT_B) ? "B" : "A");
+
+    UART_SendString(" crc=");
+    UART_SendString((g_partition.table_crc != 0U) ? "ok" : "legacy");
+
+    UART_SendString(" backup=");
+    UART_SendString((backupOk != 0U) ? "ok" : "none");
+
+    UART_SendString("\r\n");
+}
 
 /* ==================== 公共函数实现 ==================== */
 
 /**
  * @brief  初始化：从元数据区读取描述表
+ * @note   顺序：内部表（magic + CRC）→ 外部备份 → 默认表
  */
 void Partition_Init(void)
 {
+    uint8_t needRestore = 0U;
+
+    /* 外部备份可能要用到 SPI Flash */
+    (void)SpiFlash_Init();
+
     /* 从 Flash 元数据区读取（Flash 可 memory-mapped 直接读） */
     memcpy(&g_partition, (const void *)PARTITION_TABLE_ADDR, sizeof(g_partition));
 
-    /* magic 不匹配 → 首次烧录，初始化为默认表 */
-    if (g_partition.magic != PARTITION_TABLE_MAGIC) {
-        memset(&g_partition, 0, sizeof(g_partition));
-        g_partition.magic        = PARTITION_TABLE_MAGIC;
-        g_partition.active_slot  = (uint32_t)SLOT_A;
-        g_partition.slot_a_state = SLOT_STATE_EMPTY;
-        g_partition.slot_b_state = SLOT_STATE_EMPTY;
+    if (g_partition.magic == PARTITION_TABLE_MAGIC) {
+        /* 新格式表带自校验；table_crc==0 的手工表视为旧格式，只认 magic */
+        if ((g_partition.table_crc != 0U) &&
+            (Partition_CalcCrc(&g_partition) != g_partition.table_crc)) {
+            UART_SendString("Partition table CRC error, try SPI backup...\r\n");
+            needRestore = 1U;
+        }
+    } else {
+        UART_SendString("Partition table missing, try SPI backup...\r\n");
+        needRestore = 1U;
     }
+
+    if (needRestore) {
+        if (Partition_RestoreFromExternal()) {
+            UART_SendString("Partition table restored from SPI flash.\r\n");
+        } else {
+            /* 外部也没有 → 首次烧录或彻底损坏：重建默认表（激活 Slot A，两槽为空） */
+            memset(&g_partition, 0, sizeof(g_partition));
+            g_partition.magic        = PARTITION_TABLE_MAGIC;
+            g_partition.active_slot  = (uint32_t)SLOT_A;
+            g_partition.slot_a_state = SLOT_STATE_EMPTY;
+            g_partition.slot_b_state = SLOT_STATE_EMPTY;
+        }
+    }
+
+    /* 一行状态：不需要调试器，看串口就能判断"外部备份有没有生效" */
+    Partition_PrintStatus(Partition_ExternalMatches());
 }
 
 /**
@@ -114,7 +293,16 @@ uint8_t Partition_CommitUpdate(uint32_t crc32, uint32_t size)
     /* 翻转激活槽 */
     g_partition.active_slot = (uint32_t)target;
 
-    /* 原子落盘：擦写描述表扇区 */
+    /* 更新序号并重算自校验 */
+    g_partition.table_seq++;
+    g_partition.table_crc = Partition_CalcCrc(&g_partition);
+
+    /* 1) 先写外部备份：这一步失败不影响升级，内部表照写 */
+    if (Partition_SaveToExternal() != 0U) {
+        UART_SendString("WARN: partition backup to SPI flash failed\r\n");
+    }
+
+    /* 2) 再原子落盘：擦写内部描述表扇区 */
     return FlashApp_WriteBootSector(PARTITION_TABLE_ADDR,
                                     (const uint8_t *)&g_partition,
                                     sizeof(g_partition));
