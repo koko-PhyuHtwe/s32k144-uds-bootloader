@@ -154,11 +154,6 @@ int app_main(void)
         /* 检查串口是否收到 'U' 命令 */
         if (UART_ReceiveByte(&rxByte))
         {
-            /* 调试：打印收到的字符 */
-            UART_SendString("\r\n[RX] ");
-            UART_SendData(&rxByte, 1);
-            UART_SendString("\r\n");
-
             if (rxByte == 'U')
             {
                 TriggerUpgrade();

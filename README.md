@@ -3,7 +3,7 @@
 基于 S32 Design Studio (S32DS) + S32K144 (Cortex-M4F) 的 **CAN UDS Bootloader + App** 一体化工程。
 单个工程、两个构建配置，分别生成 Bootloader 和 App 固件。
 
-当前版本：**v2.0（A/B 双分区完整实现 + 传输可靠性修复，全部功能验证通过）**
+当前版本：**v2.1（A/B 双分区 + SPI Flash 分区表备份 + ADC 电压监控 + 槽位 LED 指示，全部验证通过）**
 
 ---
 
@@ -27,6 +27,7 @@
 | v1.4 | CANoe 传输容错（NRC 0x73 重同步 + 200ms 超时 + 5 次重试） | ✅ |
 | v1.5 | CAN 非阻塞发送（消除阻塞式发送 ~1s 卡顿） | ✅ |
 | **v2.0** | **A/B 双分区完整实现（双镜像 + 0x22 选槽 + 原子提交）** | ✅ 已验证 |
+| **v2.1** | **分区表 SPI Flash 备份 + ADC 供电电压监控（NRC 0x22 拦截）+ 槽位 LED 指示** | ✅ 已验证 |
 
 ---
 
@@ -283,11 +284,16 @@ demo_s32k144/
 
 ## LED 状态指示
 
-| 状态 | 蓝灯 (LED1/PTD16) | 绿灯 (LED0/PTD15) |
+硬件对应：`PTD15 = LED0 = 蓝灯`，`PTD16 = LED1 = 绿灯`，**低电平点亮**（`led.c` 的 `LED_ON_LEVEL = 0`）。
+
+| 状态 | 蓝灯 (LED0/PTD15) | 绿灯 (LED1/PTD16) |
 |------|------------------|------------------|
-| **Bootloader 运行中** | 500ms 交替闪烁 | 500ms 交替闪烁 |
-| **App 正常运行** | **常亮**（App 标志） | **200ms 快速闪烁**（App 心跳） |
-| **卡死** | 常亮 | 不亮 |
+| **Bootloader 运行中** | 500ms 同步闪烁 | 500ms 同步闪烁 |
+| **App 运行，激活槽 = A** | 熄灭 | **200ms 闪烁** |
+| **App 运行，激活槽 = B** | **200ms 闪烁** | 熄灭 |
+| **卡死 / 未启动** | — | — |
+
+激活槽取自分区描述表（`0xF000` 的 `active_slot`），串口横幅同一时间打印 `Active slot: A|B`，两处可互相印证。
 
 ---
 
@@ -301,8 +307,10 @@ demo_s32k144/
 | **0x27** | 安全访问 | 0x01 请求种子 / 0x02 发送密钥 | seed-key 解锁，未解锁时 0x34 被拒绝 (NRC=0x33) |
 | **0x2E** | 写 DID | 0xFF01 (4 字节 CRC32) | 校验 App Flash 完整性，通过则提交升级+清除标志 |
 | **0x34** | 请求下载 | 4 字节地址 + 2 字节大小 | **需先解锁**，擦除目标槽，进入升级模式 |
-| **0x36** | 传输数据 | BlockNumber + 4 字节数据 | 攒 8 字节写一次 Flash |
+| **0x36** | 传输数据 | BlockNumber + 4 字节数据 | 攒满 8 字节写一次 Flash |
 | **0x37** | 退出传输 | 无 | 补 0xFF 写入剩余数据，退出升级模式 |
+
+> **欠压保护（v2.1）**：`adc_mon` 判定供电 < 2.9 V 时，`0x34` / `0x36` / `0x2E` 直接返回 **NRC 0x22**（conditionsNotCorrect），串口对应打印 `0x34 rejected / Download aborted / Commit rejected: supply undervoltage`。下载中途被中止时会回到空闲、S3 超时后自动跳回原激活槽（不会卡在 Boot）。
 
 ### 0x27 安全访问机制
 
@@ -493,6 +501,47 @@ Bit Rate = 8MHz / (0+1) / 16 = 500,000 bps
 | `slot_a_version/crc32/size/state` | Slot A 固件元信息 |
 | `slot_b_version/crc32/size/state` | Slot B 固件元信息 |
 | `boot_count / rollback_count` | 回滚预留字段（本次未启用逻辑） |
+| `table_seq / table_crc` | 表序号 + 表自身 CRC32（写外部备份时更新） |
+
+**外部备份**：每次提交升级前，先把这 80 字节写一份到 W25Q64 的 `0x000000`（`Partition_SaveToExternal()`，擦 → 写 → 读回比对）；内部表损坏时 `Partition_Init()` 会从备份读回并重新写回 `0xF000`（`Partition_RestoreFromExternal()`）。上电打印 `[Partition] seq=N active=A|B crc=ok|legacy backup=ok|none` 便于确认状态。
+
+### SPI Flash 模块 (`spi_flash.h / spi_flash.c`)
+
+板上 W25Q64（8 MB SPI NOR），挂在 LPSPI1 上，**片选由 GPIO 软件控制**（PTB17，低有效）。
+
+| 项 | 值 |
+|------|------|
+| 总线 | LPSPI1，PTB14 / PTB15 / PTB16（SCK / MISO / MOSI，均 ALT3） |
+| 片选 | PTB17，GPIO 输出，低有效，一条命令一次传输、全程不松开 |
+| 速率 | 100 kHz（源时钟 SOSCDIV2 = 8 MHz） |
+| 容量 / 结构 | 8 MB，页 256 B，扇区 4 KB |
+| 当前用途 | 分区描述表备份（`0x000000`，只占 80 字节） |
+
+| 函数 | 功能 |
+|------|------|
+| `SpiFlash_Init()` | 初始化 LPSPI1 + 读 JEDEC ID（期望 `0xEF4017`）判断芯片是否在位 |
+| `SpiFlash_IsPresent()` | 芯片在线标志（不在位时所有上层调用安全跳过） |
+| `SpiFlash_Read(addr, buf, len)` | 读数据（≤256 字节，一次传输完成） |
+| `SpiFlash_WritePage(addr, buf, len)` | 写一页（≤256 字节，拒绝跨页） |
+| `SpiFlash_EraseSector(addr)` | 擦 4 KB 扇区（地址自动向下对齐） |
+| `SpiFlash_WaitReady(timeoutMs)` | 轮询 WIP 位等待擦写完成 |
+
+> ⚠️ 用 LPSPI 硬件自动片选（PCS3）时，多字节命令帧中途会松开片选，W25Q64 会把后续字节当成新命令，读回全 `0xFF`。所以这里坚持 **GPIO 软件片选 + 100 kHz**（与板厂例程一致）。
+
+### ADC 电压监控模块 (`adc_mon.h / adc_mon.c`)
+
+ADC0_CH2（PTA6）采样供电电压，用于升级前与升级中的欠压保护。
+
+| 项 | 值 |
+|------|------|
+| 通道 | ADC0 外部通道 2（PTA6，板上接线柱 ADC0-2） |
+| 量程 | 0–3.3 V，12 位（`mv = raw * 3300 / 4095`） |
+| 采样 | 主循环约 10 ms 一次，8 点滑动平均 |
+| 阈值 | ≥3100 mV 正常 / 2900–3100 mV 警告 / <2900 mV 危险（连续 3 次确认） |
+
+危险状态下 `0x34` / `0x36` / `0x2E` 一律返回 **NRC 0x22**（conditionsNotCorrect）并在串口打印原因。Bootloader 运行期持续采样；App 运行期目前不采样。
+
+> 演示用法：把 ADC0-2 接电位器（3.3 V — 抽头 — GND），刷写过程中拧低即可复现"掉压中止"。
 
 ---
 
@@ -569,9 +618,13 @@ Bit Rate = 8MHz / (0+1) / 16 = 500,000 bps
 - `.gitignore` / `README.md`
 
 **🚫 忽略：**
-- `Debug_*/` 编译产物（含自动生成的 bin）
-- `.settings/` IDE 偏好
-- `SDK/` NXP SDK 本地链接
+- `Boot_*/`、`APP_*/` 编译输出目录（`app_a.elf` / `app_a.bin` / `.map` 全在里面）
+- `*.o`、`*.obj`、`*.elf`、`*.bin`、`*.hex`、`*.map`、`*.siz`、`*.d`、`*.su`、`*.lst`
+- `*.cbf`（CANoe 编译产物，改 `.can` 后需在 CANoe 里 F8 重新生成）
+- `Debug_Configurations/`、`.settings/`
+- `.cproject.bak`、`.project.bak`、`*.bak`、`*.orig`（改 IDE 工程文件前的备份）
+- `SDK/` NXP SDK 本地副本
+- `*.mex` S32DS 配置工程（当前文件已被 git 跟踪，改动仍会正常出现在 `git status` 里）
 
 ---
 
@@ -585,6 +638,11 @@ Bit Rate = 8MHz / (0+1) / 16 = 500,000 bps
 6. **升级标志地址**：0xE000（Boot 保护区），App 与 Bootloader 必须使用同一地址（历史版本曾用 0x3FFF0，已废弃）。
 7. **0x27 请求长度**：子功能 0x01 为 2 字节（`02 27 01`），0x02 为 4 字节（`04 27 02 key_hi key_lo`），分别校验。
 8. **CAPL 脚本修改后需重新 Build**（F8），否则加载的是旧编译产物 .cbf。
+9. **LED 是低电平点亮**：PTD15 = LED0 = 蓝灯、PTD16 = LED1 = 绿灯，`led.c` 里 `LED_ON_LEVEL = 0`。换板子若为高电平点亮，把这个宏改成 `1`。
+10. **SPI 片选必须 GPIO 软件控制**：不要改回 LPSPI 的 PCS3 硬件片选——多字节命令帧中途会松开片选，芯片把后续字节当新命令，读回全 `0xFF`。
+11. **App 两个构建配置要分别重编**：改过 App 代码后必须 APP_A、APP_B 各 Build 一次，否则两个槽里装的是同一份旧镜像（槽位灯会永远显示同一个槽，容易误判成代码 bug）。
+12. **分区表备份与正本内容一致**：提交时先写 W25Q64（`0x000000`）再写内部 `0xF000`；若内部表损坏，上电会从外部读回并重写正本，串口打印 `Partition table restored from SPI flash.`。
+13. **ADC 欠压只看 Boot**：App 运行期不采样电压，所以"运行中掉压"不会触发保护；演示时应在刷写（Boot）阶段拧电位器。
 
 ---
 
