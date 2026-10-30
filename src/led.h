@@ -17,7 +17,7 @@
 
 /**
  * @brief  LED 初始化
- * @note   设置 LED0 点亮，LED1 熄灭
+ * @note   上电把两颗 LED 都熄灭（LED 为低电平点亮，极性在 led.c 里配置）
  */
 void LED_Init(void);
 

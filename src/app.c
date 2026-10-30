@@ -9,17 +9,44 @@
 #include "led.h"
 #include "uart.h"
 #include "flash_app.h"
+#include "partition.h"
 #include "osif.h"
 #include "device_registers.h"
 #include "interrupt_manager.h"
 #include "sdk_project_config.h"
 
+/* ==================== 槽位指示灯配置 ==================== */
+/* 实物：PTD15 = LED0 = 蓝色，PTD16 = LED1 = 绿色。
+ * 规则：跑 A 槽 → 绿灯闪（LED1，蓝灯灭）；跑 B 槽 → 蓝灯闪（LED0，绿灯灭）。
+ * 想让颜色对调，把下面两个宏互换即可，不用改别处。 */
+#define LED_SLOT_A_PIN   LED1_PIN   /* A 槽 = 绿色 */
+#define LED_SLOT_B_PIN   LED0_PIN   /* B 槽 = 蓝色 */
+
 /* ==================== 内部函数声明 ==================== */
 
 static void SystemReset(void);
 static void TriggerUpgrade(void);
+static uint8_t App_GetActiveSlot(void);
 
 /* ==================== 内部函数实现 ==================== */
+
+/**
+ * @brief  读取当前激活槽
+ * @note   直接读 Flash 0x0000F000 处的描述表，不调用 Partition_Init()，
+ *         避免 App 里再去初始化 SPI Flash / 走恢复流程。
+ * @return SLOT_A / SLOT_B；描述表无效时返回 0xFF
+ */
+static uint8_t App_GetActiveSlot(void)
+{
+    const partition_table_t *tbl = (const partition_table_t *)PARTITION_TABLE_ADDR;
+
+    if (tbl->magic != PARTITION_TABLE_MAGIC)
+    {
+        return 0xFFU;   /* 表无效（没刷过分区表），按 A 槽处理 */
+    }
+
+    return (tbl->active_slot == (uint32_t)SLOT_B) ? (uint8_t)SLOT_B : (uint8_t)SLOT_A;
+}
 
 /**
  * @brief  触发系统复位（NVIC System Reset）
@@ -87,6 +114,10 @@ int app_main(void)
     LED_Init();
     UART_Init();
 
+    /* ===== 判定当前运行的是哪个槽（直接读描述表） ===== */
+    uint8_t activeSlot = App_GetActiveSlot();
+    uint8_t slotLedPin = (activeSlot == SLOT_B) ? LED_SLOT_B_PIN : LED_SLOT_A_PIN;
+
     /* ===== App 启动信息 ===== */
     UART_SendString("\r\n");
     UART_SendString("========================================\r\n");
@@ -94,12 +125,26 @@ int app_main(void)
     UART_SendString("  Version: ");
     UART_SendString(APP_VERSION);
     UART_SendString("\r\n");
+    UART_SendString("  Active slot: ");
+    if (activeSlot == SLOT_B) {
+        UART_SendString("B");
+    } else if (activeSlot == SLOT_A) {
+        UART_SendString("A");
+    } else {
+        UART_SendString("? (partition table invalid)");
+    }
+    UART_SendString("\r\n");
     UART_SendString("  Send 'U' to enter upgrade mode\r\n");
     UART_SendString("========================================\r\n");
 
-    /* 点亮 LED1 表示 App 运行 */
-    LED_TurnOn(LED1_PIN);
-    LED_TurnOff(LED0_PIN);
+    /* ===== 槽位灯：A 槽亮绿灯，B 槽亮蓝灯，另一个熄灭 ===== */
+    if (activeSlot == SLOT_B) {
+        LED_TurnOff(LED_SLOT_A_PIN);
+        LED_TurnOn(LED_SLOT_B_PIN);
+    } else {
+        LED_TurnOff(LED_SLOT_B_PIN);
+        LED_TurnOn(LED_SLOT_A_PIN);
+    }
 
     /* ===== 主循环：LED 心跳 + 检查升级命令 ===== */
     uint16_t ledCounter = 0;
@@ -120,11 +165,11 @@ int app_main(void)
             }
         }
 
-        /* 200ms 翻转 LED0（App 心跳，比 Bootloader 快） */
+        /* 200ms 翻转"当前槽"对应的灯（A 槽=绿灯，B 槽=蓝灯） */
         ledCounter++;
         if (ledCounter >= 200U) {
             ledCounter = 0;
-            LED_Toggle(LED0_PIN);
+            LED_Toggle(slotLedPin);
         }
 
         OSIF_TimeDelay(1);

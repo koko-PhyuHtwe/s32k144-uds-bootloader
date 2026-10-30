@@ -13,6 +13,7 @@
 #include "osif.h"
 #include "interrupt_manager.h"
 #include "device_registers.h"
+#include "adc_mon.h"          /* 电压监控：欠压时拒绝/中止刷写 */
 #include "app.h"
 
 /* ==================== CMSIS 兼容函数（NXP SDK 不提供，自己实现） ==================== */
@@ -494,6 +495,14 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
     /* CRC 一致，校验通过 */
     UART_SendString("CRC OK\r\n");
 
+    /* 电压监控：提交前最后确认一次供电。欠压就不写描述表——
+     * 内部正本和外部副本都不动，下次上电还是跑原来的固件 */
+    if (AdcMon_IsCritical()) {
+        UART_SendString("Commit rejected: supply undervoltage\r\n");
+        UDS_SendNegativeResponse(UDS_SID_WRITE_DID, UDS_NRC_CONDITIONS_NOT_CORRECT);
+        return;
+    }
+
     /* 提交升级：写描述表 + 翻转激活槽（原子切换） */
     UART_SendString("Committing update to partition table...\r\n");
     if (Partition_CommitUpdate(actualCrc, downloadTotalSize) != 0U) {
@@ -573,6 +582,13 @@ static void UDS_HandleRequestDownload(const can_frame_t *frame)
         return;
     }
 
+    /* 电压监控：供电欠压时拒绝开始下载（此时还没擦任何 Flash） */
+    if (AdcMon_IsCritical()) {
+        UART_SendString("0x34 rejected: supply undervoltage\r\n");
+        UDS_SendNegativeResponse(UDS_SID_REQUEST_DOWNLOAD, UDS_NRC_CONDITIONS_NOT_CORRECT);
+        return;
+    }
+
     /* 擦除目标槽 */
     uint8_t result = FlashApp_Erase(addr, (uint32_t)size);
     if (result != 0U) {
@@ -620,6 +636,18 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
         return;
     }
 
+    /* 电压监控：刷写中途检测到供电欠压 → 立即中止本次下载，不提交，
+     * 保持当前运行的固件不变（这是"刷到一半掉电"的演示触发点） */
+    if (AdcMon_IsCritical()) {
+        UART_SendString("Download aborted: supply undervoltage\r\n");
+        UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_CONDITIONS_NOT_CORRECT);
+        downloadState   = DOWNLOAD_IDLE;
+        dataBufferIndex = 0U;
+        /* 下载已中止，允许 S3 超时后自动跳回原 App（否则会一直卡在 Boot 里） */
+        bootloaderActive = 0U;
+        return;
+    }
+
     /* 检查块序号是否正确 */
     if (recvBlockNum != blockCounter) {
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_WRONG_BLOCK_SEQUENCE);
@@ -657,6 +685,7 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
             UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_REQUEST_OUT_OF_RANGE);
             downloadState   = DOWNLOAD_IDLE;  /* 中止本次下载，需重新 0x34 */
             dataBufferIndex = 0U;
+            bootloaderActive = 0U;            /* 允许 S3 超时后回到原 App */
             return;
         }
     }
@@ -673,6 +702,7 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
                 UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_GENERAL_PROGRAMMING_FAILURE);
                 downloadState   = DOWNLOAD_IDLE;
                 dataBufferIndex = 0U;
+                bootloaderActive = 0U;        /* 允许 S3 超时后回到原 App */
                 return;
             }
             downloadAddr += 8U;

@@ -31,6 +31,7 @@ int main(void)
 #include "flash_app.h"
 #include "partition.h"
 #include "spi_flash.h"        /* 描述表外部备份 */
+#include "adc_mon.h"          /* 电压监控（演示：电位器模拟供电跌落） */
 #include "app.h"  /* 共享升级标志定义 */
 
 /**
@@ -63,6 +64,11 @@ int main(void)
     /* 7. 初始化分区模块：内部表 → 外部备份 → 默认表 */
     Partition_Init();
 
+    /* 8. 初始化 ADC 电压监控（ADC0 通道 2 = PTA6 / ADC0-2 接线柱） */
+    if (AdcMon_Init()) {
+        AdcMon_Print();
+    }
+
     /* ===== 检查升级标志 ===== */
     uint32_t upgradeFlag = *(volatile uint32_t *)UPGRADE_FLAG_ADDR;
     if (upgradeFlag == UPGRADE_FLAG_MAGIC) {
@@ -89,10 +95,10 @@ int main(void)
 
     /* ===== 外设初始化（仅 Bootloader 模式需要） ===== */
 
-    /* 8. 初始化 CAN（配置发送邮箱 M0 + 接收邮箱 M1，开启中断） */
+    /* 9. 初始化 CAN（配置发送邮箱 M0 + 接收邮箱 M1，开启中断） */
     CAN_Init();
 
-    /* 9. 初始化 UDS 诊断服务 */
+    /* 10. 初始化 UDS 诊断服务 */
     UDS_Init();
 
     /* ===== 主循环 ===== */
@@ -103,6 +109,14 @@ int main(void)
 
         /* S3Server 超时计时（每毫秒减 1） */
         UDS_Tick();
+
+        /* ADC 电压监控：每 10ms 采样一次（主循环约 1ms 一圈） */
+        static uint8_t adcCounter = 0U;
+        adcCounter++;
+        if (adcCounter >= 10U) {
+            adcCounter = 0U;
+            AdcMon_Update();
+        }
 
         /* 延时 1ms（作为超时计时基准） */
         OSIF_TimeDelay(1);

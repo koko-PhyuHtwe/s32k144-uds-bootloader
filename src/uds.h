@@ -25,6 +25,7 @@
 #define UDS_NRC_INVALID_MESSAGE_LENGTH      0x13U  /* 消息长度错误 */
 #define UDS_NRC_REQUEST_OUT_OF_RANGE        0x31U  /* 请求超出范围 */
 #define UDS_NRC_REQUEST_SEQUENCE_ERROR      0x24U  /* 请求序列错误 */
+#define UDS_NRC_CONDITIONS_NOT_CORRECT      0x22U  /* 条件不满足（供电欠压） */
 #define UDS_NRC_SECURITY_ACCESS_DENIED      0x33U  /* 安全访问拒绝（未解锁） */
 #define UDS_NRC_INVALID_KEY                 0x35U  /* 密钥错误 */
 #define UDS_NRC_EXCEEDED_NUMBER_OF_ATTEMPTS 0x36U  /* 超过尝试次数 */

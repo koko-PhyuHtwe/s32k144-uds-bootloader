@@ -184,7 +184,7 @@ on timer gTimer
       write("========================================");
       write("  Download Complete!");
       write("  Check UART: 'S32K144 App Running V1.0'");
-      write("  LED1: ON, LED0: blink 200ms");
+      write("  LED: slot A = GREEN blink, slot B = BLUE blink");
       write("========================================");
       write("[AutoStop] measurement will stop in 2s ...");
       gState = 999;

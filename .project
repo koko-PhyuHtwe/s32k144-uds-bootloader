@@ -161,6 +161,11 @@
 			<locationURI>$%7BS32K144_SDK_4_0_2_PATH%7D/platform/drivers/src/clock/S32K1xx/smc_hw_access.h</locationURI>
 		</link>
 		<link>
+			<name>doc/SDK/platform/drivers/src/adc/doxygen/adc_driver.dox</name>
+			<type>1</type>
+			<locationURI>s32sdk_s32k1xx_rtm_402/platform/drivers/src/adc/doxygen/adc_driver.dox</locationURI>
+		</link>
+		<link>
 			<name>doc/SDK/platform/drivers/src/clock/doxygen/clock_manager.dox</name>
 			<type>1</type>
 			<locationURI>s32sdk_s32k1xx_rtm_402/platform/drivers/src/clock/doxygen/clock_manager.dox</locationURI>

@@ -195,7 +195,9 @@ demo_s32k144/
 │   ├── uart.h / uart.c                ← LPUART1 驱动（中断接收）
 │   ├── can.h / can.c                  ← FlexCAN2 驱动（环形队列 + 非阻塞发送）
 │   ├── uds.h / uds.c                  ← UDS 服务 + S3Server 超时 + 跳转
-│   ├── partition.h / partition.c      ← A/B 分区描述表管理
+│   ├── partition.h / partition.c      ← A/B 分区描述表管理（含 SPI Flash 备份/恢复）
+│   ├── spi_flash.h / spi_flash.c      ← W25Q64 SPI NOR 驱动（GPIO 片选 + 100 kHz）
+│   ├── adc_mon.h / adc_mon.c          ← 供电电压监控（ADC0_CH2，欠压拦截 UDS）
 │   └── flash_app.h / flash_app.c      ← Flash 封装（擦写校验/CRC32）
 ├── board/                             ← 板级配置（Config Tools 生成）
 ├── Project_Settings/Linker_Files/
@@ -226,12 +228,17 @@ demo_s32k144/
 
 | 引脚 | 功能 | 说明 |
 |------|------|------|
-| **PTD15** | GPIO 输出 | LED0（绿灯），高电平点亮 |
-| **PTD16** | GPIO 输出 | LED1（蓝灯），高电平点亮 |
+| **PTD15** | GPIO 输出 | LED0（**蓝灯**），**低电平点亮** |
+| **PTD16** | GPIO 输出 | LED1（**绿灯**），**低电平点亮** |
 | **PTC6** | LPUART1_RX | 串口接收 |
 | **PTC7** | LPUART1_TX | 串口发送 |
 | **PTC16** | CAN2_RX | FlexCAN2 接收 |
 | **PTC17** | CAN2_TX | FlexCAN2 发送 |
+| **PTB14** | LPSPI1_SCK | W25Q64 时钟（ALT3） |
+| **PTB15** | LPSPI1_SIN | W25Q64 MISO / DO（ALT3） |
+| **PTB16** | LPSPI1_SOUT | W25Q64 MOSI / DI（ALT3） |
+| **PTB17** | GPIO 输出 | W25Q64 片选 CS#（**低有效**，软件拉片选） |
+| **PTA6** | ADC0_CH2 | 供电电压监控输入（0–3.3V，板上接线柱 ADC0-2） |
 | **PTA4** | SWD_DIO | SWD 调试数据线 |
 | **PTC4** | SWD_CLK | SWD 调试时钟线 |
 

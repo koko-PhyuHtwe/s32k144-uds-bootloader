@@ -692,12 +692,12 @@
 		<COND_TOOLCHAIN_ASM_DEFINES/>
 	</storageModule>
 	<storageModule moduleId="com.nxp.s32ds.cle.uct.internal.core.toolchainScriptProfile">
-		<COND_TOOLCHAIN_COMPONENTS_OPTION>COPY=platform.driver.osif;platform.driver.lpuart;platform.driver.osif_baremetal;platform.driver.lpspi;platform.driver.flash;platform.driver.flexcan</COND_TOOLCHAIN_COMPONENTS_OPTION>
+		<COND_TOOLCHAIN_COMPONENTS_OPTION>COPY=platform.driver.adc;platform.driver.osif;platform.driver.lpuart;platform.driver.osif_baremetal;platform.driver.lpspi;platform.driver.flash;platform.driver.flexcan</COND_TOOLCHAIN_COMPONENTS_OPTION>
 	</storageModule>
 	<storageModule moduleId="com.nxp.s32ds.cle.uct.core">
 		<COND_TOOLCHAIN_ADD_REMOVE_COMPONENTS_OPTION>true</COND_TOOLCHAIN_ADD_REMOVE_COMPONENTS_OPTION>
 		<COND_TOOLCHAIN_COPY_SOURCES>true</COND_TOOLCHAIN_COPY_SOURCES>
-		<sdkComponents>platform.driver.osif;platform.driver.clock;platform.driver.interrupt_manager;platform.driver.pins;platform.driver.osif_baremetal;platform.driver.lpuart;platform.driver.edma;platform.driver.flexcan;platform.driver.flash;platform.driver.lpspi</sdkComponents>
+		<sdkComponents>platform.driver.osif;platform.driver.clock;platform.driver.interrupt_manager;platform.driver.pins;platform.driver.osif_baremetal;platform.driver.lpuart;platform.driver.edma;platform.driver.flexcan;platform.driver.flash;platform.driver.lpspi;platform.driver.adc</sdkComponents>
 	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.internal.ui.text.commentOwnerProjectMappings"/>
 	<storageModule moduleId="scannerConfiguration">
