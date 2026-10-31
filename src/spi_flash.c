@@ -14,6 +14,7 @@
 #include "peripherals_lpspi_1.h"
 #include "pins_driver.h"
 #include "osif.h"
+#include "uart.h"
 #include <string.h>
 
 /* ==================== W25Q64 命令码 ==================== */
@@ -38,6 +39,8 @@
 #define SPI_FLASH_CS_HIGH()   PINS_DRV_WritePin(PTB, 17U, 1U)
 
 /** 先用厂家验证过的 100 kHz，跑通后再往上提 */
+/* 实测：把上面这个值改成 4 MHz 后读 ID 依然正常（0x00EF4017），
+ * 说明决定能否通信的是片选方式，与速率无关；此处仍保持 100 kHz，给 1kΩ 串阻留余量。 */
 #define SPI_FLASH_BAUD_HZ     100000UL
 
 /* ==================== 内部变量 ==================== */
@@ -96,6 +99,56 @@ static void SpiFlash_PutAddr(uint8_t *dst, uint32_t addr)
     dst[2] = (uint8_t)(addr & 0xFFU);
 }
 
+/* ==================== 串口打印辅助（不引入 printf） ==================== */
+
+/**
+ * @brief 打印 8 位十六进制，带 0x 前缀
+ * @note  Boot 区只有 56KB，且已经用到 UART 驱动，所以手写转换，不拉 printf
+ */
+static void SpiFlash_UartHex32(uint32_t value)
+{
+    uint8_t i;
+    uint8_t ch;
+
+    UART_SendString("0x");
+    for (i = 0U; i < 8U; i++)
+    {
+        uint8_t nib = (uint8_t)((value >> ((7U - i) * 4U)) & 0x0FU);
+
+        ch = (nib < 10U) ? (uint8_t)('0' + nib) : (uint8_t)('A' + nib - 10U);
+        UART_SendData(&ch, 1U);
+    }
+}
+
+/**
+ * @brief 打印十进制（无前导零）
+ */
+static void SpiFlash_UartDecimal(uint32_t value)
+{
+    uint8_t buf[10];
+    uint8_t len = 0U;
+    uint8_t ch;
+
+    if (value == 0U)
+    {
+        ch = (uint8_t)'0';
+        UART_SendData(&ch, 1U);
+        return;
+    }
+
+    while ((value > 0U) && (len < (uint8_t)sizeof(buf)))
+    {
+        buf[len] = (uint8_t)('0' + (uint8_t)(value % 10U));
+        value /= 10U;
+        len++;
+    }
+    while (len > 0U)
+    {
+        len--;
+        UART_SendData(&buf[len], 1U);
+    }
+}
+
 /* ==================== 公共函数 ==================== */
 
 bool SpiFlash_Init(void)
@@ -122,6 +175,7 @@ bool SpiFlash_Init(void)
         if (LPSPI_DRV_MasterInit(SPI_FLASH_INSTANCE, &lpspi_1State,
                                  &cfg) != STATUS_SUCCESS)
         {
+            UART_SendString("[SPI ] LPSPI1 init failed -> backup disabled\r\n");
             return false;
         }
     }
@@ -134,6 +188,21 @@ bool SpiFlash_Init(void)
     manufacturer = (uint8_t)((s_jedec_id >> 16U) & 0xFFU);
 
     s_present = ((manufacturer != 0x00U) && (manufacturer != 0xFFU));
+
+    /* 只在初始化（上电）时打印一次状态：App 不调用本函数，不会重复刷屏 */
+    if (s_present)
+    {
+        UART_SendString("[SPI ] W25Q64 present | jedec=");
+        SpiFlash_UartHex32(s_jedec_id);
+        UART_SendString(" | ");
+        SpiFlash_UartDecimal(SPI_FLASH_BAUD_HZ / 1000UL);
+        UART_SendString(" kHz\r\n");
+    }
+    else
+    {
+        UART_SendString("[SPI ] W25Q64 absent -> backup disabled\r\n");
+    }
+
     return s_present;
 }
 

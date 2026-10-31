@@ -15,8 +15,7 @@
 /* ==================== 槽状态 ==================== */
 typedef enum {
     SLOT_STATE_EMPTY   = 0U,   /* 空槽（未烧录有效固件） */
-    SLOT_STATE_VALID   = 1U,   /* 有效固件 */
-    SLOT_STATE_INVALID = 2U    /* 预留：固件无效（回滚用） */
+    SLOT_STATE_VALID   = 1U    /* 有效固件 */
 } slot_state_t;
 
 /* ==================== 槽 ID ==================== */

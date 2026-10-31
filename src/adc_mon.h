@@ -83,6 +83,14 @@ uint16_t AdcMon_GetRaw(void);
 adc_mon_state_t AdcMon_GetState(void);
 
 /**
+ * @brief  监控是否可用（ADC 初始化是否成功）
+ * @note   返回 false 时"电压是否危险"的判断不可信（s_state 会一直停在
+ *         UNKNOWN），上层必须拒绝擦写 Flash——宁可刷不进去，也不能在
+ *         失去保护的情况下动 Flash。
+ */
+bool AdcMon_IsReady(void);
+
+/**
  * @brief  电压是否危险（危险时上层应拒绝擦写 Flash）
  */
 bool AdcMon_IsCritical(void);

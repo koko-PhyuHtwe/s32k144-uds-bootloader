@@ -9,7 +9,6 @@
 /* 元数据区(描述表) 0x0000F000 ~ 0x0000FFFF (4KB, 1 个扇区)             */
 /* Slot A (App)     0x00010000 ~ 0x00047FFF (224KB)                    */
 /* Slot B (App)     0x00048000 ~ 0x0007FFFF (224KB)                    */
-#define BOOT_FLASH_BASE      0x00000000U  /* Boot 区起始 */
 #define BOOT_FLASH_SIZE      0x0000E000U  /* Boot 代码区 56KB */
 #define BOOT_DATA_BASE       0x0000E000U  /* Boot 保护数据区起始（升级标志+描述表） */
 #define UPGRADE_FLAG_ADDR    0x0000E000U  /* 升级标志区地址 */

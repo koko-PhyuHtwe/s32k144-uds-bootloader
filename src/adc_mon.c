@@ -205,6 +205,11 @@ adc_mon_state_t AdcMon_GetState(void)
     return s_state;
 }
 
+bool AdcMon_IsReady(void)
+{
+    return s_inited;
+}
+
 bool AdcMon_IsCritical(void)
 {
     return (s_state == ADC_MON_STATE_CRITICAL);

@@ -371,7 +371,7 @@ Final : 0x11 01                  → ECU 复位 (正响应 0x51 01)
 | 上电后 5 秒内无有效 UDS 请求 | 尝试跳转到激活槽 App |
 | 收到任何有效 UDS 请求 | 重置计时器为 5 秒 |
 | 升级中（0x34 之后、0x37 之前） | 超时不跳，继续等待（防止中断写入） |
-| App 合法性校验 | MSP 必须在 SRAM 范围 (0x20000000~0x20010000)，PC 必须在当前槽范围 (slotBase~slotBase+224KB)，否则留在 Bootloader |
+| App 合法性校验 | MSP 必须在 SRAM 范围 (0x20000000~0x20007000，到栈顶为止)，PC 必须在当前槽范围 (slotBase~slotBase+224KB)，否则留在 Bootloader |
 
 ---
 
@@ -438,6 +438,7 @@ Final : 0x11 01                  → ECU 复位 (正响应 0x51 01)
 ```
 [SYS ] S32K144 Bootloader
 [SYS ] CORE 80MHz | BUS 40MHz | FLASH 20MHz | UART 115200
+[SPI ] W25Q64 present | jedec=0x00EF4017 | 100 kHz
 [PART] seq=1 active=A crc=ok backup=ok
 [ADC ] 3300 mV OK
 [BOOT] jump -> App
@@ -449,6 +450,7 @@ App 里收到 `U` 后走升级路径：
 [OTA ] 'U' received -> write upgrade flag ... OK -> reset
 [SYS ] S32K144 Bootloader
 [SYS ] CORE 80MHz | BUS 40MHz | FLASH 20MHz | UART 115200
+[SPI ] W25Q64 present | jedec=0x00EF4017 | 100 kHz
 [PART] seq=1 active=A crc=ok backup=ok
 [ADC ] 3300 mV OK
 [BOOT] upgrade flag set -> stay in bootloader | active slot A
@@ -460,6 +462,7 @@ App 里收到 `U` 后走升级路径：
 |------|------|
 | `[SYS ]` | 启动横幅、时钟 / 波特率等系统信息 |
 | `[PART]` | 分区表状态、外部备份与恢复、提交 |
+| `[SPI ]` | W25Q64 探测结果（JEDEC ID / 通信速率） |
 | `[ADC ]` | 供电电压采样结果 |
 | `[BOOT]` | Bootloader 决策（跳转 App / 停留等待） |
 | `[OTA ]` | 升级流程：0x34 / 0x36 / 0x2E、CRC、提交 |

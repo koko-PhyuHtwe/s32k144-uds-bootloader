@@ -582,7 +582,16 @@ static void UDS_HandleRequestDownload(const can_frame_t *frame)
         return;
     }
 
-    /* 电压监控：供电欠压时拒绝开始下载（此时还没擦任何 Flash） */
+    /* 电压监控（策略 A：失去保护就不动 Flash）：
+     * 1) ADC 监控没起来 → 电压判断不可信，同样拒绝，不能"默认认为安全"
+     * 2) 供电欠压 → 拒绝开始下载
+     * 两条都放在擦除之前，拒绝时不会碰任何 Flash */
+    if (!AdcMon_IsReady()) {
+        UART_SendString("[OTA ] 0x34 rejected: ADC monitor not ready\r\n");
+        UDS_SendNegativeResponse(UDS_SID_REQUEST_DOWNLOAD, UDS_NRC_CONDITIONS_NOT_CORRECT);
+        return;
+    }
+
     if (AdcMon_IsCritical()) {
         UART_SendString("[OTA ] 0x34 rejected: supply undervoltage\r\n");
         UDS_SendNegativeResponse(UDS_SID_REQUEST_DOWNLOAD, UDS_NRC_CONDITIONS_NOT_CORRECT);
@@ -636,8 +645,26 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
         return;
     }
 
+    /* 检查块序号是否正确。
+     * 放在电压检查之前：上位机重发同一帧时序号已经不匹配，回 0x73 让它重同步
+     * 就够了，不能因为一次重发就把整个下载判死。 */
+    if (recvBlockNum != blockCounter) {
+        UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_WRONG_BLOCK_SEQUENCE);
+        return;
+    }
+
     /* 电压监控：刷写中途检测到供电欠压 → 立即中止本次下载，不提交，
-     * 保持当前运行的固件不变（这是"刷到一半掉电"的演示触发点） */
+     * 保持当前运行的固件不变（这是"刷到一半掉电"的演示触发点）。
+     * ADC 监控没起来时电压判断不可信，同样中止。 */
+    if (!AdcMon_IsReady()) {
+        UART_SendString("[OTA ] download aborted: ADC monitor not ready\r\n");
+        UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_CONDITIONS_NOT_CORRECT);
+        downloadState   = DOWNLOAD_IDLE;
+        dataBufferIndex = 0U;
+        bootloaderActive = 0U;
+        return;
+    }
+
     if (AdcMon_IsCritical()) {
         UART_SendString("[OTA ] download aborted: supply undervoltage\r\n");
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_CONDITIONS_NOT_CORRECT);
@@ -645,12 +672,6 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
         dataBufferIndex = 0U;
         /* 下载已中止，允许 S3 超时后自动跳回原 App（否则会一直卡在 Boot 里） */
         bootloaderActive = 0U;
-        return;
-    }
-
-    /* 检查块序号是否正确 */
-    if (recvBlockNum != blockCounter) {
-        UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_WRONG_BLOCK_SEQUENCE);
         return;
     }
 
@@ -866,12 +887,13 @@ void Jump_To_App(uint32_t slotBase)
     uint32_t appPc  = *(volatile uint32_t *)(slotBase + 4U);
 
     /* 2. 合法性检查：
-     *    - MSP 必须在 SRAM 范围内 (S32K144: 0x20000000 ~ 0x2000FFFF)
+     *    - MSP 必须在 SRAM 范围内 (S32K144: 0x20000000 ~ 0x20006FFF，
+     *      栈顶 __StackTop = 0x20007000，初始 MSP 就等于这个值)
      *    - PC  必须在当前槽范围内 (slotBase ~ slotBase+SLOT_SIZE)
      *    任一不通过就认为是非法 App（比如残留测试数据）
      */
     if ((appMsp == 0xFFFFFFFFU) || (appMsp == 0x00000000U) ||
-        (appMsp < 0x20000000U) || (appMsp > 0x20010000U) ||
+        (appMsp < 0x20000000U) || (appMsp > 0x20007000U) ||
         (appPc  < slotBase) || (appPc >= (slotBase + SLOT_SIZE))) {
         UART_SendString("[ERR ] no valid App -> stay in bootloader\r\n");
         /* 没有 App，重新开始倒计时 */

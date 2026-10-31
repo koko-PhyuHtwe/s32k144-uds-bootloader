@@ -149,9 +149,13 @@ static void CAN_Callback(uint8_t instance, flexcan_event_type_t eventType,
 
         /* 2. 如果队列没满（next != tail），才写入 */
         if (next != canRxTail) {
+            /* 按实际长度拷贝，不能写死 8：DLC < 8 时多拷的字节是接收缓冲里的
+             * 残留数据；DLC > 8 是非法帧（经典 CAN 最大 8），裁到 8 防越界。 */
+            uint8_t copyLen = (canRxBuffer.dataLen > 8U) ? 8U : canRxBuffer.dataLen;
+
             canRxQueue[canRxHead].id  = canRxBuffer.msgId;
-            canRxQueue[canRxHead].dlc = canRxBuffer.dataLen;
-            memcpy(canRxQueue[canRxHead].data, canRxBuffer.data, 8);
+            canRxQueue[canRxHead].dlc = copyLen;
+            memcpy(canRxQueue[canRxHead].data, canRxBuffer.data, copyLen);
             canRxHead = next;  /* 推进写指针 */
         }
         /* 如果满了就丢弃这帧（简化处理） */
