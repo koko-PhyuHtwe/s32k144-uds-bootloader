@@ -46,12 +46,12 @@
 /* ==================== 内部变量 ==================== */
 
 /** 发送/接收共用缓冲区（静态分配，避免占用栈空间） */
-static uint8_t  s_tx_buf[SPI_FLASH_MAX_XFER];
-static uint8_t  s_rx_buf[SPI_FLASH_MAX_XFER];
+static uint8_t  s_txBuf[SPI_FLASH_MAX_XFER];
+static uint8_t  s_rxBuf[SPI_FLASH_MAX_XFER];
 
 static bool     s_initialized = false;   /* LPSPI 是否已初始化 */
 static bool     s_present     = false;   /* 芯片是否被探测到 */
-static uint32_t s_jedec_id    = 0U;      /* 缓存的 JEDEC ID */
+static uint32_t s_jedecId     = 0U;      /* 缓存的 JEDEC ID */
 
 /* ==================== 内部函数 ==================== */
 
@@ -85,8 +85,8 @@ static bool SpiFlash_Transfer(const uint8_t *tx, uint8_t *rx, uint16_t len)
  */
 static bool SpiFlash_WriteEnable(void)
 {
-    s_tx_buf[0] = CMD_WRITE_ENABLE;
-    return SpiFlash_Transfer(s_tx_buf, s_rx_buf, 1U);
+    s_txBuf[0] = CMD_WRITE_ENABLE;
+    return SpiFlash_Transfer(s_txBuf, s_rxBuf, 1U);
 }
 
 /**
@@ -184,8 +184,8 @@ bool SpiFlash_Init(void)
     OSIF_TimeDelay(5);
 
     /* 读 JEDEC ID 探测芯片；读不到会返回 0x000000 或 0xFFFFFF */
-    s_jedec_id = SpiFlash_ReadJedecId();
-    manufacturer = (uint8_t)((s_jedec_id >> 16U) & 0xFFU);
+    s_jedecId = SpiFlash_ReadJedecId();
+    manufacturer = (uint8_t)((s_jedecId >> 16U) & 0xFFU);
 
     s_present = ((manufacturer != 0x00U) && (manufacturer != 0xFFU));
 
@@ -193,7 +193,7 @@ bool SpiFlash_Init(void)
     if (s_present)
     {
         UART_SendString("[SPI ] W25Q64 present | jedec=");
-        SpiFlash_UartHex32(s_jedec_id);
+        SpiFlash_UartHex32(s_jedecId);
         UART_SendString(" | ");
         SpiFlash_UartDecimal(SPI_FLASH_BAUD_HZ / 1000UL);
         UART_SendString(" kHz\r\n");
@@ -213,32 +213,32 @@ bool SpiFlash_IsPresent(void)
 
 uint32_t SpiFlash_ReadJedecId(void)
 {
-    s_tx_buf[0] = CMD_JEDEC_ID;
-    s_tx_buf[1] = 0xFFU;    /* 空拍，只为把 ID 移出来 */
-    s_tx_buf[2] = 0xFFU;
-    s_tx_buf[3] = 0xFFU;
+    s_txBuf[0] = CMD_JEDEC_ID;
+    s_txBuf[1] = 0xFFU;    /* 空拍，只为把 ID 移出来 */
+    s_txBuf[2] = 0xFFU;
+    s_txBuf[3] = 0xFFU;
 
-    if (!SpiFlash_Transfer(s_tx_buf, s_rx_buf, 4U))
+    if (!SpiFlash_Transfer(s_txBuf, s_rxBuf, 4U))
     {
         return 0U;
     }
 
-    return (((uint32_t)s_rx_buf[1] << 16U) |
-            ((uint32_t)s_rx_buf[2] << 8U)  |
-             (uint32_t)s_rx_buf[3]);
+    return (((uint32_t)s_rxBuf[1] << 16U) |
+            ((uint32_t)s_rxBuf[2] << 8U)  |
+             (uint32_t)s_rxBuf[3]);
 }
 
 uint8_t SpiFlash_ReadStatus1(void)
 {
-    s_tx_buf[0] = CMD_READ_STATUS1;
-    s_tx_buf[1] = 0xFFU;
+    s_txBuf[0] = CMD_READ_STATUS1;
+    s_txBuf[1] = 0xFFU;
 
-    if (!SpiFlash_Transfer(s_tx_buf, s_rx_buf, 2U))
+    if (!SpiFlash_Transfer(s_txBuf, s_rxBuf, 2U))
     {
         return 0xFFU;   /* 传输失败按"忙"处理 */
     }
 
-    return s_rx_buf[1];
+    return s_rxBuf[1];
 }
 
 bool SpiFlash_WaitReady(uint32_t timeoutMs)
@@ -269,17 +269,17 @@ bool SpiFlash_Read(uint32_t addr, uint8_t *buf, uint32_t len)
         return false;
     }
 
-    s_tx_buf[0] = CMD_READ_DATA;
-    SpiFlash_PutAddr(&s_tx_buf[1], addr);
-    (void)memset(&s_tx_buf[4], 0xFF, len);      /* 空拍，时钟要一直打 */
+    s_txBuf[0] = CMD_READ_DATA;
+    SpiFlash_PutAddr(&s_txBuf[1], addr);
+    (void)memset(&s_txBuf[4], 0xFF, len);      /* 空拍，时钟要一直打 */
 
-    if (!SpiFlash_Transfer(s_tx_buf, s_rx_buf, (uint16_t)(4U + len)))
+    if (!SpiFlash_Transfer(s_txBuf, s_rxBuf, (uint16_t)(4U + len)))
     {
         return false;
     }
 
     /* 前 4 字节是命令/地址阶段的回读，丢弃 */
-    (void)memcpy(buf, &s_rx_buf[4], len);
+    (void)memcpy(buf, &s_rxBuf[4], len);
     return true;
 }
 
@@ -307,11 +307,11 @@ bool SpiFlash_WritePage(uint32_t addr, const uint8_t *buf, uint32_t len)
         return false;
     }
 
-    s_tx_buf[0] = CMD_PAGE_PROGRAM;
-    SpiFlash_PutAddr(&s_tx_buf[1], addr);
-    (void)memcpy(&s_tx_buf[4], buf, len);
+    s_txBuf[0] = CMD_PAGE_PROGRAM;
+    SpiFlash_PutAddr(&s_txBuf[1], addr);
+    (void)memcpy(&s_txBuf[4], buf, len);
 
-    if (!SpiFlash_Transfer(s_tx_buf, s_rx_buf, (uint16_t)(4U + len)))
+    if (!SpiFlash_Transfer(s_txBuf, s_rxBuf, (uint16_t)(4U + len)))
     {
         return false;
     }
@@ -333,10 +333,10 @@ bool SpiFlash_EraseSector(uint32_t addr)
         return false;
     }
 
-    s_tx_buf[0] = CMD_SECTOR_ERASE;
-    SpiFlash_PutAddr(&s_tx_buf[1], addr);
+    s_txBuf[0] = CMD_SECTOR_ERASE;
+    SpiFlash_PutAddr(&s_txBuf[1], addr);
 
-    if (!SpiFlash_Transfer(s_tx_buf, s_rx_buf, 4U))
+    if (!SpiFlash_Transfer(s_txBuf, s_rxBuf, 4U))
     {
         return false;
     }

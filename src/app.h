@@ -19,6 +19,6 @@
 /* 注：升级标志地址 UPGRADE_FLAG_ADDR 定义在 flash_app.h（Boot 保护区常量区） */
 
 /* ==================== 函数声明 ==================== */
-int app_main(void);
+int App_Main(void);
 
 #endif /* APP_H */

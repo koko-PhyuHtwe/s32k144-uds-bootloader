@@ -1,16 +1,32 @@
+/**
+ * @file    flash_app.c
+ * @brief   内部 P-Flash 驱动实现
+ * @details 提供擦除、写入、校验、CRC32 计算，并负责 Boot 保护区
+ *          （升级标志 / 分区描述表）的专用擦写接口。
+ *
+ *          地址权限边界：
+ *            App 区    [0x00010000, 0x00080000)  → FlashApp_Erase / FlashApp_Write
+ *            Boot 保护区 [0x0000E000, 0x00010000)  → FlashApp_EraseBootSector
+ *                                                    / FlashApp_WriteBootSector
+ */
+
 #include "flash_app.h"
 #include "peripherals_flash_1.h"
 #include "interrupt_manager.h"
 
+/* ==================== 静态变量定义 ==================== */
+
 /* Flash 驱动配置结构体（Init 后填充，后续所有操作都用它） */
-static flash_ssd_config_t flashSSDConfig;
+static flash_ssd_config_t s_flashConfig;
+
+/* ==================== 公共函数实现 ==================== */
 
 /**
  * @brief  初始化 Flash 驱动
  */
 void FlashApp_Init(void)
 {
-    FLASH_DRV_Init(&Flash_InitConfig0, &flashSSDConfig);
+    FLASH_DRV_Init(&Flash_InitConfig0, &s_flashConfig);
 }
 
 /**
@@ -51,7 +67,7 @@ uint8_t FlashApp_Erase(uint32_t addr, uint32_t size)
     INT_SYS_DisableIRQGlobal();
 
     /* 4. 执行擦除 */
-    status_t status = FLASH_DRV_EraseSector(&flashSSDConfig, alignedAddr, alignedSize);
+    status_t status = FLASH_DRV_EraseSector(&s_flashConfig, alignedAddr, alignedSize);
 
     /* 5. 开中断 */
     INT_SYS_EnableIRQGlobal();
@@ -94,7 +110,7 @@ uint8_t FlashApp_Write(uint32_t addr, const uint8_t *data, uint32_t size)
     INT_SYS_DisableIRQGlobal();
 
     /* 4. 执行写入 */
-    status_t status = FLASH_DRV_Program(&flashSSDConfig, addr, size, data);
+    status_t status = FLASH_DRV_Program(&s_flashConfig, addr, size, data);
 
     /* 5. 开中断 */
     INT_SYS_EnableIRQGlobal();
@@ -122,7 +138,7 @@ uint8_t FlashApp_EraseBootSector(uint32_t addr)
     INT_SYS_DisableIRQGlobal();
 
     /* 3. 擦除该扇区 */
-    status_t status = FLASH_DRV_EraseSector(&flashSSDConfig, addr, FLASH_SECTOR_SIZE);
+    status_t status = FLASH_DRV_EraseSector(&s_flashConfig, addr, FLASH_SECTOR_SIZE);
 
     /* 4. 开中断 */
     INT_SYS_EnableIRQGlobal();
@@ -157,11 +173,11 @@ uint8_t FlashApp_WriteBootSector(uint32_t addr, const uint8_t *data, uint32_t si
     INT_SYS_DisableIRQGlobal();
 
     /* 4. 擦除该扇区 */
-    status_t status = FLASH_DRV_EraseSector(&flashSSDConfig, addr, FLASH_SECTOR_SIZE);
+    status_t status = FLASH_DRV_EraseSector(&s_flashConfig, addr, FLASH_SECTOR_SIZE);
 
     /* 5. 擦除成功才写 */
     if (status == STATUS_SUCCESS) {
-        status = FLASH_DRV_Program(&flashSSDConfig, addr, size, data);
+        status = FLASH_DRV_Program(&s_flashConfig, addr, size, data);
     }
 
     /* 6. 开中断 */

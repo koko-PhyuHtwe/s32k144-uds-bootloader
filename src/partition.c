@@ -17,7 +17,7 @@
 #define PARTITION_BACKUP_BASE   0x00000000U
 
 /* ==================== RAM 描述表副本 ==================== */
-static partition_table_t g_partition;
+static partition_table_t s_partition;
 
 /* ==================== 内部函数 ==================== */
 
@@ -48,8 +48,8 @@ static uint8_t Partition_SaveToExternal(void)
     }
 
     if (!SpiFlash_WritePage(PARTITION_BACKUP_BASE,
-                            (const uint8_t *)&g_partition,
-                            (uint32_t)sizeof(g_partition))) {
+                            (const uint8_t *)&s_partition,
+                            (uint32_t)sizeof(s_partition))) {
         return 1U;
     }
 
@@ -59,7 +59,7 @@ static uint8_t Partition_SaveToExternal(void)
         return 1U;
     }
 
-    return (memcmp(&chk, &g_partition, sizeof(chk)) == 0U) ? 0U : 1U;
+    return (memcmp(&chk, &s_partition, sizeof(chk)) == 0U) ? 0U : 1U;
 }
 
 /**
@@ -87,12 +87,12 @@ static uint8_t Partition_RestoreFromExternal(void)
         return 0U;
     }
 
-    g_partition = ext;
+    s_partition = ext;
 
     /* 写回内部元数据区：下次上电直接读到好表，不用再走恢复 */
     (void)FlashApp_WriteBootSector(PARTITION_TABLE_ADDR,
-                                   (const uint8_t *)&g_partition,
-                                   (uint32_t)sizeof(g_partition));
+                                   (const uint8_t *)&s_partition,
+                                   (uint32_t)sizeof(s_partition));
 
     return 1U;
 }
@@ -143,7 +143,7 @@ static uint8_t Partition_ExternalMatches(void)
         return 0U;
     }
 
-    return (memcmp(&ext, &g_partition, sizeof(ext)) == 0U) ? 1U : 0U;
+    return (memcmp(&ext, &s_partition, sizeof(ext)) == 0U) ? 1U : 0U;
 }
 
 /**
@@ -152,13 +152,13 @@ static uint8_t Partition_ExternalMatches(void)
 static void Partition_PrintStatus(uint8_t backupOk)
 {
     UART_SendString("[PART] seq=");
-    Partition_PrintU32((uint32_t)g_partition.table_seq);
+    Partition_PrintU32((uint32_t)s_partition.table_seq);
 
     UART_SendString(" active=");
-    UART_SendString((g_partition.active_slot == (uint32_t)SLOT_B) ? "B" : "A");
+    UART_SendString((s_partition.active_slot == (uint32_t)SLOT_B) ? "B" : "A");
 
     UART_SendString(" crc=");
-    UART_SendString((g_partition.table_crc != 0U) ? "ok" : "legacy");
+    UART_SendString((s_partition.table_crc != 0U) ? "ok" : "legacy");
 
     UART_SendString(" backup=");
     UART_SendString((backupOk != 0U) ? "ok" : "none");
@@ -180,12 +180,12 @@ void Partition_Init(void)
     (void)SpiFlash_Init();
 
     /* 从 Flash 元数据区读取（Flash 可 memory-mapped 直接读） */
-    memcpy(&g_partition, (const void *)PARTITION_TABLE_ADDR, sizeof(g_partition));
+    memcpy(&s_partition, (const void *)PARTITION_TABLE_ADDR, sizeof(s_partition));
 
-    if (g_partition.magic == PARTITION_TABLE_MAGIC) {
+    if (s_partition.magic == PARTITION_TABLE_MAGIC) {
         /* 新格式表带自校验；table_crc==0 的手工表视为旧格式，只认 magic */
-        if ((g_partition.table_crc != 0U) &&
-            (Partition_CalcCrc(&g_partition) != g_partition.table_crc)) {
+        if ((s_partition.table_crc != 0U) &&
+            (Partition_CalcCrc(&s_partition) != s_partition.table_crc)) {
             UART_SendString("[PART] internal table CRC error -> try SPI backup\r\n");
             needRestore = 1U;
         }
@@ -199,11 +199,11 @@ void Partition_Init(void)
             UART_SendString("[PART] restored from SPI flash -> OK\r\n");
         } else {
             /* 外部也没有 → 首次烧录或彻底损坏：重建默认表（激活 Slot A，两槽为空） */
-            memset(&g_partition, 0, sizeof(g_partition));
-            g_partition.magic        = PARTITION_TABLE_MAGIC;
-            g_partition.active_slot  = (uint32_t)SLOT_A;
-            g_partition.slot_a_state = SLOT_STATE_EMPTY;
-            g_partition.slot_b_state = SLOT_STATE_EMPTY;
+            memset(&s_partition, 0, sizeof(s_partition));
+            s_partition.magic        = PARTITION_TABLE_MAGIC;
+            s_partition.active_slot  = (uint32_t)SLOT_A;
+            s_partition.slot_a_state = SLOT_STATE_EMPTY;
+            s_partition.slot_b_state = SLOT_STATE_EMPTY;
         }
     }
 
@@ -216,7 +216,7 @@ void Partition_Init(void)
  */
 uint8_t Partition_IsValid(void)
 {
-    return (g_partition.magic == PARTITION_TABLE_MAGIC) ? 1U : 0U;
+    return (s_partition.magic == PARTITION_TABLE_MAGIC) ? 1U : 0U;
 }
 
 /**
@@ -224,7 +224,7 @@ uint8_t Partition_IsValid(void)
  */
 slot_id_t Partition_GetActiveSlot(void)
 {
-    if (g_partition.active_slot == (uint32_t)SLOT_B) {
+    if (s_partition.active_slot == (uint32_t)SLOT_B) {
         return SLOT_B;
     }
     return SLOT_A;
@@ -244,9 +244,9 @@ uint32_t Partition_GetActiveBase(void)
 uint32_t Partition_GetActiveVersion(void)
 {
     if (Partition_GetActiveSlot() == SLOT_A) {
-        return g_partition.slot_a_version;
+        return s_partition.slot_a_version;
     }
-    return g_partition.slot_b_version;
+    return s_partition.slot_b_version;
 }
 
 /**
@@ -279,23 +279,23 @@ uint8_t Partition_CommitUpdate(uint32_t crc32, uint32_t size)
 
     /* 更新 RAM 副本中目标槽的字段 */
     if (target == SLOT_A) {
-        g_partition.slot_a_version = newVersion;
-        g_partition.slot_a_crc32   = crc32;
-        g_partition.slot_a_size    = size;
-        g_partition.slot_a_state   = SLOT_STATE_VALID;
+        s_partition.slot_a_version = newVersion;
+        s_partition.slot_a_crc32   = crc32;
+        s_partition.slot_a_size    = size;
+        s_partition.slot_a_state   = SLOT_STATE_VALID;
     } else {
-        g_partition.slot_b_version = newVersion;
-        g_partition.slot_b_crc32   = crc32;
-        g_partition.slot_b_size    = size;
-        g_partition.slot_b_state   = SLOT_STATE_VALID;
+        s_partition.slot_b_version = newVersion;
+        s_partition.slot_b_crc32   = crc32;
+        s_partition.slot_b_size    = size;
+        s_partition.slot_b_state   = SLOT_STATE_VALID;
     }
 
     /* 翻转激活槽 */
-    g_partition.active_slot = (uint32_t)target;
+    s_partition.active_slot = (uint32_t)target;
 
     /* 更新序号并重算自校验 */
-    g_partition.table_seq++;
-    g_partition.table_crc = Partition_CalcCrc(&g_partition);
+    s_partition.table_seq++;
+    s_partition.table_crc = Partition_CalcCrc(&s_partition);
 
     /* 1) 先写外部备份：这一步失败不影响升级，内部表照写 */
     if (Partition_SaveToExternal() != 0U) {
@@ -304,8 +304,8 @@ uint8_t Partition_CommitUpdate(uint32_t crc32, uint32_t size)
 
     /* 2) 再原子落盘：擦写内部描述表扇区 */
     return FlashApp_WriteBootSector(PARTITION_TABLE_ADDR,
-                                    (const uint8_t *)&g_partition,
-                                    sizeof(g_partition));
+                                    (const uint8_t *)&s_partition,
+                                    sizeof(s_partition));
 }
 
 /**
@@ -324,14 +324,14 @@ uint8_t Partition_VerifyActiveSlot(void)
     active = Partition_GetActiveSlot();
     if (active == SLOT_A) {
         base  = SLOT_A_BASE;
-        size  = g_partition.slot_a_size;
-        crc   = g_partition.slot_a_crc32;
-        state = g_partition.slot_a_state;
+        size  = s_partition.slot_a_size;
+        crc   = s_partition.slot_a_crc32;
+        state = s_partition.slot_a_state;
     } else {
         base  = SLOT_B_BASE;
-        size  = g_partition.slot_b_size;
-        crc   = g_partition.slot_b_crc32;
-        state = g_partition.slot_b_state;
+        size  = s_partition.slot_b_size;
+        crc   = s_partition.slot_b_crc32;
+        state = s_partition.slot_b_state;
     }
 
     /* 非 VALID 状态（EMPTY / 未登记）→ 没有可对 CRC 的元数据，

@@ -17,7 +17,7 @@
  */
 int main(void)
 {
-    return app_main();
+    return App_Main();
 }
 
 #else

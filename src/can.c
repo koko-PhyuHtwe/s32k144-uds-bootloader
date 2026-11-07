@@ -9,27 +9,27 @@
 /* ==================== 静态变量定义 ==================== */
 
 /* CAN 发送信息结构体 */
-static flexcan_data_info_t canTxInfo = {
+static flexcan_data_info_t s_txInfo = {
     .msg_id_type = FLEXCAN_MSG_ID_STD,    /* 标准 ID */
     .data_length = 8U,                     /* 数据长度 8 字节 */
     .is_remote   = false,                  /* 非远程帧 */
 };
 
 /* CAN 接收信息结构体 */
-static flexcan_data_info_t canRxInfo = {
+static flexcan_data_info_t s_rxInfo = {
     .msg_id_type = FLEXCAN_MSG_ID_STD,    /* 标准 ID */
     .data_length = 8U,                     /* 接收数据长度 8 字节 */
     .is_remote   = false,                  /* 非远程帧 */
 };
 
 /* 接收数据缓冲区（供 FLEXCAN_DRV_Receive 使用） */
-static flexcan_msgbuff_t canRxBuffer;
+static flexcan_msgbuff_t s_rxBuffer;
 
-/* ===== 新增：环形队列相关变量 ===== */
-static can_frame_t canRxQueue[CAN_RX_QUEUE_SIZE]; /* 存储数组（货架） */
-static volatile uint8_t canRxHead = 0;             /* 写指针（中断用） */
-static volatile uint8_t canRxTail = 0;             /* 读指针（主循环用） */
-static uint8_t canInitialized = 0;                 /* CAN 初始化标志 */
+/* 环形队列：中断写 head，主循环读 tail */
+static can_frame_t      s_rxQueue[CAN_RX_QUEUE_SIZE];  /* 帧缓冲区（16 格） */
+static volatile uint8_t s_rxHead      = 0U;            /* 写下标（中断用） */
+static volatile uint8_t s_rxTail      = 0U;            /* 读下标（主循环用） */
+static uint8_t          s_initialized = 0U;            /* CAN 初始化标志 */
 
 /* ==================== 静态函数声明 ==================== */
 
@@ -56,19 +56,19 @@ void CAN_Init(void)
     FLEXCAN_DRV_Init(CAN_INSTANCE, &flexcanState2, &flexcanInitConfig2);
 
     /* 配置发送邮箱 (M0) */
-    FLEXCAN_DRV_ConfigTxMb(CAN_INSTANCE, CAN_TX_MB_IDX, &canTxInfo, CAN_TX_ID);
+    FLEXCAN_DRV_ConfigTxMb(CAN_INSTANCE, CAN_TX_MB_IDX, &s_txInfo, CAN_TX_ID);
 
     /* 配置接收邮箱 (M1)，过滤 ID = 0x7E0 */
-    FLEXCAN_DRV_ConfigRxMb(CAN_INSTANCE, CAN_RX_MB_IDX, &canRxInfo, CAN_RX_ID);
+    FLEXCAN_DRV_ConfigRxMb(CAN_INSTANCE, CAN_RX_MB_IDX, &s_rxInfo, CAN_RX_ID);
 
     /* 安装事件回调函数 */
     FLEXCAN_DRV_InstallEventCallback(CAN_INSTANCE, CAN_Callback, NULL);
 
     /* 启动接收：设置 MB 状态为 RX_BUSY，使能 MB 级中断 */
-    FLEXCAN_DRV_Receive(CAN_INSTANCE, CAN_RX_MB_IDX, &canRxBuffer);
+    FLEXCAN_DRV_Receive(CAN_INSTANCE, CAN_RX_MB_IDX, &s_rxBuffer);
 
     /* 标记已初始化 */
-    canInitialized = 1;
+    s_initialized = 1;
 }
 
 /**
@@ -77,9 +77,9 @@ void CAN_Init(void)
  */
 void CAN_Deinit(void)
 {
-    if (canInitialized) {
+    if (s_initialized) {
         FLEXCAN_DRV_Deinit(CAN_INSTANCE);
-        canInitialized = 0;
+        s_initialized = 0;
     }
 }
 
@@ -96,10 +96,10 @@ void CAN_Deinit(void)
 void CAN_SendMessage(uint32_t id, const uint8_t *data, uint8_t len)
 {
     /* 更新数据长度 */
-    canTxInfo.data_length = len;
+    s_txInfo.data_length = len;
 
     /* 非阻塞发送，立即返回 */
-    (void)FLEXCAN_DRV_Send(CAN_INSTANCE, CAN_TX_MB_IDX, &canTxInfo,
+    (void)FLEXCAN_DRV_Send(CAN_INSTANCE, CAN_TX_MB_IDX, &s_txInfo,
                            id, data);
 }
 
@@ -109,7 +109,7 @@ void CAN_SendMessage(uint32_t id, const uint8_t *data, uint8_t len)
  */
 uint8_t CAN_RxAvailable(void)
 {
-    return (canRxHead != canRxTail);
+    return (s_rxHead != s_rxTail);
 }
 
 /**
@@ -119,8 +119,8 @@ uint8_t CAN_RxAvailable(void)
 void CAN_GetRxFrame(can_frame_t *frame)
 {
     if (CAN_RxAvailable()) {
-        *frame = canRxQueue[canRxTail];
-        canRxTail = (canRxTail + 1) % CAN_RX_QUEUE_SIZE;
+        *frame = s_rxQueue[s_rxTail];
+        s_rxTail = (s_rxTail + 1) % CAN_RX_QUEUE_SIZE;
     }
 }
 
@@ -145,22 +145,22 @@ static void CAN_Callback(uint8_t instance, flexcan_event_type_t eventType,
     if ((eventType == FLEXCAN_EVENT_RX_COMPLETE) && (buffIdx == CAN_RX_MB_IDX))
     {
         /* 1. 计算下一个写位置（先不写，先看能不能写） */
-        uint8_t next = (canRxHead + 1) % CAN_RX_QUEUE_SIZE;
+        uint8_t next = (s_rxHead + 1) % CAN_RX_QUEUE_SIZE;
 
         /* 2. 如果队列没满（next != tail），才写入 */
-        if (next != canRxTail) {
+        if (next != s_rxTail) {
             /* 按实际长度拷贝，不能写死 8：DLC < 8 时多拷的字节是接收缓冲里的
              * 残留数据；DLC > 8 是非法帧（经典 CAN 最大 8），裁到 8 防越界。 */
-            uint8_t copyLen = (canRxBuffer.dataLen > 8U) ? 8U : canRxBuffer.dataLen;
+            uint8_t copyLen = (s_rxBuffer.dataLen > 8U) ? 8U : s_rxBuffer.dataLen;
 
-            canRxQueue[canRxHead].id  = canRxBuffer.msgId;
-            canRxQueue[canRxHead].dlc = copyLen;
-            memcpy(canRxQueue[canRxHead].data, canRxBuffer.data, copyLen);
-            canRxHead = next;  /* 推进写指针 */
+            s_rxQueue[s_rxHead].id  = s_rxBuffer.msgId;
+            s_rxQueue[s_rxHead].dlc = copyLen;
+            memcpy(s_rxQueue[s_rxHead].data, s_rxBuffer.data, copyLen);
+            s_rxHead = next;  /* 推进写指针 */
         }
         /* 如果满了就丢弃这帧（简化处理） */
 
         /* 3. 重新启动接收 */
-        FLEXCAN_DRV_Receive(CAN_INSTANCE, CAN_RX_MB_IDX, &canRxBuffer);
+        FLEXCAN_DRV_Receive(CAN_INSTANCE, CAN_RX_MB_IDX, &s_rxBuffer);
     }
 }

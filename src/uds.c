@@ -80,24 +80,24 @@ typedef enum {
     DOWNLOAD_IN_PROGRESS    /* 下载进行中 */
 } download_state_t;
 
-static download_state_t downloadState     = DOWNLOAD_IDLE;
-static uint32_t downloadStartAddr          = 0U;   /* 下载起始地址（保存供 CRC 校验） */
-static uint32_t downloadAddr              = 0U;   /* 当前写入地址 */
-static uint32_t downloadTotalSize         = 0U;   /* 总大小 */
-static uint8_t  blockCounter              = 1U;    /* 期望的块序号 */
-static uint8_t  dataBuffer[8];                    /* 数据缓存（攒8字节写一次） */
-static uint8_t  dataBufferIndex           = 0U;   /* 缓存当前字节数 */
-static uint8_t  updateCommitted           = 0U;   /* 本会话 0x2E 是否已成功提交（幂等保护） */
+static download_state_t s_downloadState      = DOWNLOAD_IDLE;
+static uint32_t         s_downloadStartAddr  = 0U;   /* 下载起始地址（保存供 CRC 校验） */
+static uint32_t         s_downloadAddr       = 0U;   /* 当前写入地址 */
+static uint32_t         s_downloadTotalSize  = 0U;   /* 总大小 */
+static uint8_t          s_blockCounter       = 1U;   /* 期望的块序号 */
+static uint8_t          s_dataBuffer[8];             /* 数据缓存（攒 8 字节写一次） */
+static uint8_t          s_dataBufferIndex    = 0U;   /* 缓存当前字节数 */
+static uint8_t          s_updateCommitted    = 0U;   /* 本会话 0x2E 是否已成功提交（幂等保护） */
 
 /* ==================== 0x27 安全访问状态 ==================== */
-static uint8_t  securityUnlocked          = 0U;   /* 0=锁定, 1=已解锁 */
-static uint16_t securitySeed              = 0U;   /* 当前下发的种子 */
-static uint8_t  securitySeedRequested     = 0U;   /* 0=未发种子, 1=已发种子待校验 */
-static uint8_t  securityAttemptCounter    = 0U;   /* 失败计数器 */
+static uint8_t  s_securityUnlocked       = 0U;   /* 0=锁定, 1=已解锁 */
+static uint16_t s_securitySeed           = 0U;   /* 当前下发的种子 */
+static uint8_t  s_securitySeedRequested  = 0U;   /* 0=未发种子, 1=已发种子待校验 */
+static uint8_t  s_securityAttemptCounter = 0U;   /* 失败计数器 */
 
 /* ==================== S3Server 超时管理 ==================== */
-static volatile uint32_t s3ServerTimer = 0U;  /* 剩余超时时间 (ms) */
-static uint8_t bootloaderActive = 0U;          /* 0=可以跳App, 1=正在升级，禁止跳 */
+static volatile uint32_t s_s3Timer          = 0U;   /* 剩余超时时间 (ms) */
+static uint8_t           s_bootloaderActive = 0U;   /* 0=可跳 App, 1=升级中，禁止跳 */
 
 /* ==================== 公共接口 ==================== */
 
@@ -106,17 +106,17 @@ static uint8_t bootloaderActive = 0U;          /* 0=可以跳App, 1=正在升级
  */
 void UDS_Init(void)
 {
-    s3ServerTimer = S3_SERVER_TIMEOUT_MS;  /* 启动 S3Server 倒计时 */
-    bootloaderActive = 0U;
+    s_s3Timer = S3_SERVER_TIMEOUT_MS;  /* 启动 S3Server 倒计时 */
+    s_bootloaderActive = 0U;
 
     /* 安全访问初始化为锁定状态 */
-    securityUnlocked       = 0U;
-    securitySeed           = 0U;
-    securitySeedRequested  = 0U;
-    securityAttemptCounter = 0U;
+    s_securityUnlocked       = 0U;
+    s_securitySeed           = 0U;
+    s_securitySeedRequested  = 0U;
+    s_securityAttemptCounter = 0U;
 
     /* 提交标志复位：允许新一轮下载后执行 0x2E 提交 */
-    updateCommitted        = 0U;
+    s_updateCommitted        = 0U;
 }
 
 /**
@@ -140,7 +140,7 @@ void UDS_Process(void)
     }
 
     /* 收到有效 UDS 请求，重置 S3Server 定时器 */
-    s3ServerTimer = S3_SERVER_TIMEOUT_MS;
+    s_s3Timer = S3_SERVER_TIMEOUT_MS;
 
     /* 解析 SID（data[1]），分发到对应服务 */
     uint8_t sid = frame.data[1];
@@ -348,7 +348,7 @@ static void UDS_HandleSecurityAccess(const can_frame_t *frame)
     /* 子功能 0x01：请求种子 */
     if (subFunc == UDS_SECURITY_REQUEST_SEED) {
         /* 超过失败重试上限，拒绝再次下发种子 */
-        if (securityAttemptCounter >= UDS_SECURITY_MAX_ATTEMPTS) {
+        if (s_securityAttemptCounter >= UDS_SECURITY_MAX_ATTEMPTS) {
             UDS_SendNegativeResponse(UDS_SID_SECURITY_ACCESS, UDS_NRC_EXCEEDED_NUMBER_OF_ATTEMPTS);
             return;
         }
@@ -356,22 +356,22 @@ static void UDS_HandleSecurityAccess(const can_frame_t *frame)
         /* 生成种子：用系统 tick 作为伪随机源（项目简化实现）。
            一轮只生成一次：重复请求种子返回同一个值——否则上位机
            超时重试会触发重新生成，旧种子算的 key 就和 ECU 存的对不上（NRC 0x35） */
-        if (securitySeedRequested == 0U) {
-            securitySeed = (uint16_t)(OSIF_GetMilliseconds() & 0xFFFFU);
-            if (securitySeed == 0U) {
-                securitySeed = 0x1234U;  /* 避免 0 种子 */
+        if (s_securitySeedRequested == 0U) {
+            s_securitySeed = (uint16_t)(OSIF_GetMilliseconds() & 0xFFFFU);
+            if (s_securitySeed == 0U) {
+                s_securitySeed = 0x1234U;  /* 避免 0 种子 */
             }
         }
 
         /* 标记已下发种子，等待密钥 */
-        securitySeedRequested = 1U;
-        securityUnlocked      = 0U;
+        s_securitySeedRequested = 1U;
+        s_securityUnlocked      = 0U;
 
         /* 正响应：子功能 + 2字节种子（大端） */
         uint8_t payload[3];
         payload[0] = subFunc;
-        payload[1] = (uint8_t)(securitySeed >> 8);
-        payload[2] = (uint8_t)(securitySeed & 0xFFU);
+        payload[1] = (uint8_t)(s_securitySeed >> 8);
+        payload[2] = (uint8_t)(s_securitySeed & 0xFFU);
 
         UDS_SendPositiveResponse(UDS_SID_SECURITY_ACCESS, payload, 3);
         return;
@@ -379,7 +379,7 @@ static void UDS_HandleSecurityAccess(const can_frame_t *frame)
 
     /* 子功能 0x02：发送密钥 */
     /* 已解锁时重复收到密钥（上轮正响应丢失、上位机重发）：直接回正响应，幂等 */
-    if (securityUnlocked == 1U) {
+    if (s_securityUnlocked == 1U) {
         uint8_t okPayload[1];
         okPayload[0] = subFunc;
         UDS_SendPositiveResponse(UDS_SID_SECURITY_ACCESS, okPayload, 1);
@@ -387,7 +387,7 @@ static void UDS_HandleSecurityAccess(const can_frame_t *frame)
     }
 
     /* 必须先请求过种子才能发密钥 */
-    if (securitySeedRequested != 1U) {
+    if (s_securitySeedRequested != 1U) {
         UDS_SendNegativeResponse(UDS_SID_SECURITY_ACCESS, UDS_NRC_REQUEST_SEQUENCE_ERROR);
         return;
     }
@@ -396,16 +396,16 @@ static void UDS_HandleSecurityAccess(const can_frame_t *frame)
     uint16_t recvKey = ((uint16_t)frame->data[3] << 8) | frame->data[4];
 
     /* 计算期望密钥：key = (seed + 0x1111) & 0xFFFF */
-    uint16_t expectedKey = (uint16_t)((securitySeed + UDS_SECURITY_KEY_OFFSET) & 0xFFFFU);
+    uint16_t expectedKey = (uint16_t)((s_securitySeed + UDS_SECURITY_KEY_OFFSET) & 0xFFFFU);
 
     if (recvKey != expectedKey) {
         /* 密钥错误：累加失败计数，锁定状态，清除种子请求标志 */
-        securityAttemptCounter++;
-        securitySeedRequested = 0U;
-        securityUnlocked      = 0U;
+        s_securityAttemptCounter++;
+        s_securitySeedRequested = 0U;
+        s_securityUnlocked      = 0U;
 
         /* 达到上限返回 0x36，否则返回 0x35 */
-        if (securityAttemptCounter >= UDS_SECURITY_MAX_ATTEMPTS) {
+        if (s_securityAttemptCounter >= UDS_SECURITY_MAX_ATTEMPTS) {
             UDS_SendNegativeResponse(UDS_SID_SECURITY_ACCESS, UDS_NRC_EXCEEDED_NUMBER_OF_ATTEMPTS);
         } else {
             UDS_SendNegativeResponse(UDS_SID_SECURITY_ACCESS, UDS_NRC_INVALID_KEY);
@@ -414,9 +414,9 @@ static void UDS_HandleSecurityAccess(const can_frame_t *frame)
     }
 
     /* 密钥正确：解锁，清零失败计数 */
-    securityUnlocked       = 1U;
-    securitySeedRequested  = 0U;
-    securityAttemptCounter = 0U;
+    s_securityUnlocked       = 1U;
+    s_securitySeedRequested  = 0U;
+    s_securityAttemptCounter = 0U;
 
     /* 正响应：子功能 */
     uint8_t payload[1];
@@ -459,15 +459,15 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
         return;
     }
 
-    /* 检查是否已下载完成（必须有 downloadTotalSize > 0 才能校验） */
-    if (downloadState != DOWNLOAD_IDLE || downloadTotalSize == 0U) {
+    /* 检查是否已下载完成（必须有 s_downloadTotalSize > 0 才能校验） */
+    if (s_downloadState != DOWNLOAD_IDLE || s_downloadTotalSize == 0U) {
         UDS_SendNegativeResponse(UDS_SID_WRITE_DID, UDS_NRC_REQUEST_SEQUENCE_ERROR);
         return;
     }
 
     /* 幂等保护：本会话已成功提交过（0x2E 正响应丢失、CANoe 超时重发场景）。
        直接重发原正响应，不再重复提交——否则会把激活槽再翻回去。 */
-    if (updateCommitted == 1U) {
+    if (s_updateCommitted == 1U) {
         uint8_t retryPayload[3];
         retryPayload[0] = (uint8_t)(did >> 8);
         retryPayload[1] = (uint8_t)(did & 0xFFU);
@@ -482,8 +482,8 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
                            ((uint32_t)frame->data[6] << 8)  |
                            ((uint32_t)frame->data[7]);
 
-    /* 计算 Flash 区域的 CRC32（downloadStartAddr 在 0x34 中保存） */
-    uint32_t actualCrc = FlashApp_CalcCRC32(downloadStartAddr, downloadTotalSize);
+    /* 计算 Flash 区域的 CRC32（s_downloadStartAddr 在 0x34 中保存） */
+    uint32_t actualCrc = FlashApp_CalcCRC32(s_downloadStartAddr, s_downloadTotalSize);
 
     if (actualCrc != expectedCrc) {
         /* CRC 不一致，校验失败，不跳 App */
@@ -505,7 +505,7 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
 
     /* 提交升级：写描述表 + 翻转激活槽（原子切换） */
     UART_SendString("[OTA ] committing partition table ...\r\n");
-    if (Partition_CommitUpdate(actualCrc, downloadTotalSize) != 0U) {
+    if (Partition_CommitUpdate(actualCrc, s_downloadTotalSize) != 0U) {
         UART_SendString("[OTA ] commit FAILED\r\n");
         UDS_SendNegativeResponse(UDS_SID_WRITE_DID, UDS_NRC_GENERAL_PROGRAMMING_FAILURE);
         return;
@@ -515,7 +515,7 @@ static void UDS_HandleWriteDID(const can_frame_t *frame)
     FlashApp_EraseBootSector(UPGRADE_FLAG_ADDR);
 
     /* 标记本会话已提交：后续 0x2E 重发只回响应、不再提交（幂等） */
-    updateCommitted = 1U;
+    s_updateCommitted = 1U;
 
     /* 正响应：DID + status(0=pass) */
     uint8_t payload[3];
@@ -559,7 +559,7 @@ static void UDS_HandleRequestDownload(const can_frame_t *frame)
     }
 
     /* 安全检查：必须先通过 0x27 安全访问解锁，否则拒绝下载 */
-    if (securityUnlocked != 1U) {
+    if (s_securityUnlocked != 1U) {
         UDS_SendNegativeResponse(UDS_SID_REQUEST_DOWNLOAD, UDS_NRC_SECURITY_ACCESS_DENIED);
         return;
     }
@@ -606,14 +606,14 @@ static void UDS_HandleRequestDownload(const can_frame_t *frame)
     }
 
     /* 初始化下载状态 */
-    downloadState    = DOWNLOAD_IN_PROGRESS;
-    downloadStartAddr = addr;   /* 保存下载起始地址供 CRC 校验 */
-    downloadAddr     = addr;
-    downloadTotalSize = (uint32_t)size;
-    blockCounter     = 1U;
-    dataBufferIndex  = 0U;
-    updateCommitted  = 0U;  /* 新下载会话，允许 0x2E 提交 */
-    bootloaderActive = 1U;  /* 升级中，禁止跳 App */
+    s_downloadState    = DOWNLOAD_IN_PROGRESS;
+    s_downloadStartAddr = addr;   /* 保存下载起始地址供 CRC 校验 */
+    s_downloadAddr     = addr;
+    s_downloadTotalSize = (uint32_t)size;
+    s_blockCounter     = 1U;
+    s_dataBufferIndex  = 0U;
+    s_updateCommitted  = 0U;  /* 新下载会话，允许 0x2E 提交 */
+    s_bootloaderActive = 1U;  /* 升级中，禁止跳 App */
 
     /* 构造正响应：数据格式标识 + 地址长度 + 每块最大字节数 */
     uint8_t payload[3];
@@ -640,7 +640,7 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
     uint8_t recvBlockNum = frame->data[2];
 
     /* 检查是否在下载状态 */
-    if (downloadState != DOWNLOAD_IN_PROGRESS) {
+    if (s_downloadState != DOWNLOAD_IN_PROGRESS) {
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_REQUEST_SEQUENCE_ERROR);
         return;
     }
@@ -648,7 +648,7 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
     /* 检查块序号是否正确。
      * 放在电压检查之前：上位机重发同一帧时序号已经不匹配，回 0x73 让它重同步
      * 就够了，不能因为一次重发就把整个下载判死。 */
-    if (recvBlockNum != blockCounter) {
+    if (recvBlockNum != s_blockCounter) {
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_WRONG_BLOCK_SEQUENCE);
         return;
     }
@@ -659,19 +659,19 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
     if (!AdcMon_IsReady()) {
         UART_SendString("[OTA ] download aborted: ADC monitor not ready\r\n");
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_CONDITIONS_NOT_CORRECT);
-        downloadState   = DOWNLOAD_IDLE;
-        dataBufferIndex = 0U;
-        bootloaderActive = 0U;
+        s_downloadState   = DOWNLOAD_IDLE;
+        s_dataBufferIndex = 0U;
+        s_bootloaderActive = 0U;
         return;
     }
 
     if (AdcMon_IsCritical()) {
         UART_SendString("[OTA ] download aborted: supply undervoltage\r\n");
         UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_CONDITIONS_NOT_CORRECT);
-        downloadState   = DOWNLOAD_IDLE;
-        dataBufferIndex = 0U;
+        s_downloadState   = DOWNLOAD_IDLE;
+        s_dataBufferIndex = 0U;
         /* 下载已中止，允许 S3 超时后自动跳回原 App（否则会一直卡在 Boot 里） */
-        bootloaderActive = 0U;
+        s_bootloaderActive = 0U;
         return;
     }
 
@@ -691,48 +691,48 @@ static void UDS_HandleTransferData(const can_frame_t *frame)
     }
 
     /* 越界保护：已写字节 + 缓存中字节 + 本帧字节 不得超过 0x34 声明的总长度。
-     * 否则上位机多发数据（或 block 序号一直对）会把 downloadAddr 一路推过
+     * 否则上位机多发数据（或 block 序号一直对）会把 s_downloadAddr 一路推过
      * 槽末尾，写穿非激活槽之后的 Flash 区域，且不可恢复。
      * 上限取"总长度向上对齐到 4"：CANoe 脚本按 ceil(size/4) 发块，最后一块
      * 会用填充字节凑满 4 字节，必须容忍；这样最多多写 3 字节，仍在已擦除的
      * 槽内，且 CRC 只覆盖 size 字节，不受影响。 */
     {
-        uint32_t receivedSoFar = (downloadAddr - downloadStartAddr) + (uint32_t)dataBufferIndex;
-        uint32_t allowedTotal  = (downloadTotalSize + 3U) & ~3U;
+        uint32_t receivedSoFar = (s_downloadAddr - s_downloadStartAddr) + (uint32_t)s_dataBufferIndex;
+        uint32_t allowedTotal  = (s_downloadTotalSize + 3U) & ~3U;
 
         if ((receivedSoFar >= allowedTotal) ||
             ((uint32_t)recvDataLen > (allowedTotal - receivedSoFar))) {
             UART_SendString("[OTA ] download overflow -> abort, restart from 0x34\r\n");
             UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_REQUEST_OUT_OF_RANGE);
-            downloadState   = DOWNLOAD_IDLE;  /* 中止本次下载，需重新 0x34 */
-            dataBufferIndex = 0U;
-            bootloaderActive = 0U;            /* 允许 S3 超时后回到原 App */
+            s_downloadState   = DOWNLOAD_IDLE;  /* 中止本次下载，需重新 0x34 */
+            s_dataBufferIndex = 0U;
+            s_bootloaderActive = 0U;            /* 允许 S3 超时后回到原 App */
             return;
         }
     }
 
     /* 把数据放入缓存；每攒满 8 字节立刻写一次 Flash。
      * 注意必须"边填边判满"：若一次性拷完再判，遇到上位机发 3/5 字节的不齐帧，
-     * dataBufferIndex 会累积到 8 以上，dataBuffer[8] 就被越界写（数组只有 8 字节）。 */
+     * s_dataBufferIndex 会累积到 8 以上，s_dataBuffer[8] 就被越界写（数组只有 8 字节）。 */
     for (uint8_t i = 0U; i < recvDataLen; i++) {
-        dataBuffer[dataBufferIndex++] = frame->data[3U + i];
+        s_dataBuffer[s_dataBufferIndex++] = frame->data[3U + i];
 
-        if (dataBufferIndex >= 8U) {
-            uint8_t result = FlashApp_Write(downloadAddr, dataBuffer, 8U);
+        if (s_dataBufferIndex >= 8U) {
+            uint8_t result = FlashApp_Write(s_downloadAddr, s_dataBuffer, 8U);
             if (result != 0U) {
                 UDS_SendNegativeResponse(UDS_SID_TRANSFER_DATA, UDS_NRC_GENERAL_PROGRAMMING_FAILURE);
-                downloadState   = DOWNLOAD_IDLE;
-                dataBufferIndex = 0U;
-                bootloaderActive = 0U;        /* 允许 S3 超时后回到原 App */
+                s_downloadState   = DOWNLOAD_IDLE;
+                s_dataBufferIndex = 0U;
+                s_bootloaderActive = 0U;        /* 允许 S3 超时后回到原 App */
                 return;
             }
-            downloadAddr += 8U;
-            dataBufferIndex = 0U;
+            s_downloadAddr += 8U;
+            s_dataBufferIndex = 0U;
         }
     }
 
     /* 块序号 +1（自然溢出: 255 → 0 → 1 → 2 → ...） */
-    blockCounter++;
+    s_blockCounter++;
 
     /* 回复正响应 */
     uint8_t payload[1];
@@ -751,27 +751,27 @@ static void UDS_HandleRequestTransferExit(const can_frame_t *frame)
     (void)frame;  /* 0x37 请求不需要额外参数 */
 
     /* 检查是否在下载状态 */
-    if (downloadState != DOWNLOAD_IN_PROGRESS) {
+    if (s_downloadState != DOWNLOAD_IN_PROGRESS) {
         UDS_SendNegativeResponse(UDS_SID_REQUEST_TRANSFER_EXIT, UDS_NRC_REQUEST_SEQUENCE_ERROR);
         return;
     }
 
     /* 处理剩余数据（不足 8 字节，补 0xFF 到 8 字节写入） */
-    if (dataBufferIndex > 0U) {
-        for (uint8_t i = dataBufferIndex; i < 8U; i++) {
-            dataBuffer[i] = 0xFFU;
+    if (s_dataBufferIndex > 0U) {
+        for (uint8_t i = s_dataBufferIndex; i < 8U; i++) {
+            s_dataBuffer[i] = 0xFFU;
         }
-        uint8_t result = FlashApp_Write(downloadAddr, dataBuffer, 8U);
+        uint8_t result = FlashApp_Write(s_downloadAddr, s_dataBuffer, 8U);
         if (result != 0U) {
             UDS_SendNegativeResponse(UDS_SID_REQUEST_TRANSFER_EXIT, UDS_NRC_GENERAL_PROGRAMMING_FAILURE);
-            downloadState = DOWNLOAD_IDLE;
+            s_downloadState = DOWNLOAD_IDLE;
             return;
         }
     }
 
     /* 下载完成，回到空闲状态 */
-    downloadState = DOWNLOAD_IDLE;
-    bootloaderActive = 0U;  /* 允许跳 App */
+    s_downloadState = DOWNLOAD_IDLE;
+    s_bootloaderActive = 0U;  /* 允许跳 App */
 
     /* 回复正响应（无额外数据） */
     UDS_SendPositiveResponse(UDS_SID_REQUEST_TRANSFER_EXIT, NULL, 0);
@@ -847,17 +847,17 @@ static void UDS_SendNegativeResponse(uint8_t sid, uint8_t nrc)
  */
 void UDS_Tick(void)
 {
-    if (s3ServerTimer > 0U) {
-        s3ServerTimer--;
-        if (s3ServerTimer == 0U) {
+    if (s_s3Timer > 0U) {
+        s_s3Timer--;
+        if (s_s3Timer == 0U) {
             /* 超时了，如果不在升级中就跳 App */
-            if (!bootloaderActive) {
+            if (!s_bootloaderActive) {
                 UART_SendString("[UDS ] S3 timeout -> check App\r\n");
                 Jump_To_App(Partition_GetActiveBase());
             } else {
                 /* 升级中，延长超时 */
                 UART_SendString("[UDS ] S3 timeout, download in progress\r\n");
-                s3ServerTimer = S3_SERVER_TIMEOUT_MS;
+                s_s3Timer = S3_SERVER_TIMEOUT_MS;
             }
         }
     }
@@ -897,7 +897,7 @@ void Jump_To_App(uint32_t slotBase)
         (appPc  < slotBase) || (appPc >= (slotBase + SLOT_SIZE))) {
         UART_SendString("[ERR ] no valid App -> stay in bootloader\r\n");
         /* 没有 App，重新开始倒计时 */
-        s3ServerTimer = S3_SERVER_TIMEOUT_MS;
+        s_s3Timer = S3_SERVER_TIMEOUT_MS;
         /* 确保中断重新打开（如果之前被关过） */
         INT_SYS_EnableIRQGlobal();
         return;

@@ -24,8 +24,8 @@
 
 /* ==================== 内部函数声明 ==================== */
 
-static void SystemReset(void);
-static void TriggerUpgrade(void);
+static void App_SystemReset(void);
+static void App_TriggerUpgrade(void);
 static uint8_t App_GetActiveSlot(void);
 
 /* ==================== 内部函数实现 ==================== */
@@ -51,7 +51,7 @@ static uint8_t App_GetActiveSlot(void)
 /**
  * @brief  触发系统复位（NVIC System Reset）
  */
-static void SystemReset(void)
+static void App_SystemReset(void)
 {
     uint32_t regValue;
 
@@ -71,7 +71,7 @@ static void SystemReset(void)
  * @brief  触发升级：写升级标志到 Flash，然后复位
  *         Bootloader 启动时检测到标志会留在 Bootloader 等待 UDS 下载
  */
-static void TriggerUpgrade(void)
+static void App_TriggerUpgrade(void)
 {
     /* 升级标志数据：magic + padding（补齐 8 字节对齐） */
     uint32_t flagData[2] = { UPGRADE_FLAG_MAGIC, 0xFFFFFFFFU };
@@ -94,7 +94,7 @@ static void TriggerUpgrade(void)
     OSIF_TimeDelay(100);
 
     /* 系统复位，重启进入 Bootloader */
-    SystemReset();
+    App_SystemReset();
 }
 
 /* ==================== 公共函数实现 ==================== */
@@ -103,7 +103,7 @@ static void TriggerUpgrade(void)
  * @brief  App 主函数
  * @return 理论上不会返回
  */
-int app_main(void)
+int App_Main(void)
 {
     /* ===== 系统初始化 ===== */
     CLOCK_DRV_Init(&clockMan1_InitConfig0);
@@ -149,7 +149,7 @@ int app_main(void)
         {
             if (rxByte == 'U')
             {
-                TriggerUpgrade();
+                App_TriggerUpgrade();
             }
         }
 
